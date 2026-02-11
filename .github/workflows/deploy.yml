@@ -60,7 +60,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Build the Qwik app
+      # Build the Qwik app (client + server + lint)
       - name: Build
         run: npx qwik build
         env:
@@ -68,37 +68,17 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
           VITE_BASE_PATH: '/purplesky/'
 
-      # Create an index.html at root that redirects into the base path,
-      # and ensure the SPA works with direct navigation on GitHub Pages.
-      - name: Prepare dist
-        run: |
-          DIST_DIR=dist/purplesky
-          # If the build put files under dist/purplesky/ move everything up
-          if [ -d "$DIST_DIR" ] && [ ! -f dist/index.html ]; then
-            echo "Moving dist/purplesky/* → dist/"
-            cp -r "$DIST_DIR"/* dist/
-          fi
-          # Verify build
-          ls -la dist/
-          if [ ! -f dist/index.html ]; then
-            echo "::error::Build failed: dist/index.html not found"
-            exit 1
-          fi
-          # SPA fallback: copy index.html to 404.html so GitHub Pages serves it for all routes
-          cp dist/index.html dist/404.html
+      # Generate static HTML + copy PWA assets
+      - name: Generate static site
+        run: VITE_BASE_PATH=/purplesky/ node scripts/ssg.mjs
 
-      # Copy service worker and PWA assets
-      - name: Copy PWA assets
+      # Verify output
+      - name: Verify build
         run: |
-          cp public/sw.js dist/purplesky/sw.js 2>/dev/null || true
-          cp public/manifest.json dist/purplesky/manifest.json 2>/dev/null || true
-          cp public/icon.svg dist/purplesky/icon.svg 2>/dev/null || true
-          cp public/client-metadata.json dist/purplesky/client-metadata.json 2>/dev/null || true
-          # Also copy to root dist in case we flattened
-          cp public/sw.js dist/sw.js 2>/dev/null || true
-          cp public/manifest.json dist/manifest.json 2>/dev/null || true
-          cp public/icon.svg dist/icon.svg 2>/dev/null || true
-          cp public/client-metadata.json dist/client-metadata.json 2>/dev/null || true
+          ls -la dist/
+          ls -la dist/purplesky/
+          test -f dist/index.html || (echo "::error::dist/index.html not found" && exit 1)
+          test -f dist/purplesky/index.html || (echo "::error::dist/purplesky/index.html not found" && exit 1)
 
       # Upload artifact for GitHub Pages
       - uses: actions/upload-pages-artifact@v3

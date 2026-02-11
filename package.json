@@ -13,7 +13,7 @@
     "build.server": "vite build --ssr src/entry.ssr.tsx",
     "build:wasm": "cd wasm && wasm-pack build --target web --out-dir ../src/wasm-pkg",
     "build:static": "npm run build && npm run ssg",
-    "ssg": "npx qwik ssg",
+    "ssg": "node scripts/ssg.mjs",
     "preview": "qwik build preview && vite preview --open",
     "deploy": "npm run build:static",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
