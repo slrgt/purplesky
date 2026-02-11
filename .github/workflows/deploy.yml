@@ -93,11 +93,9 @@ jobs:
           if [ -f dist/purplesky/index.html ]; then
             cp dist/purplesky/index.html dist/purplesky/404.html
           fi
-          # Root-level redirect
-          if [ ! -f dist/index.html ]; then
-            echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/purplesky/"></head><body></body></html>' > dist/index.html
-          fi
-          cp dist/purplesky/404.html dist/404.html 2>/dev/null || cp dist/purplesky/index.html dist/404.html 2>/dev/null || true
+          # Root 404 for SPA fallback on unknown routes
+          cp dist/purplesky/index.html dist/404.html 2>/dev/null || true
+          # Do NOT create dist/index.html - it would shadow dist/purplesky/index.html on GitHub Pages
 
           # Copy PWA assets
           cp public/sw.js dist/purplesky/sw.js 2>/dev/null || true
