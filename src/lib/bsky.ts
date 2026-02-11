@@ -318,7 +318,10 @@ export async function getGuestFeed(
   const perHandle = Math.ceil(need / handles.length) + 5;
   const results = await Promise.all(
     handles.map((actor) =>
-      publicAgent.getAuthorFeed({ actor, limit: perHandle }).catch(() => ({ data: { feed: [] } })),
+      publicAgent.getAuthorFeed({ actor, limit: perHandle }).catch((err) => {
+        console.warn(`[PurpleSky] Guest feed fetch failed for ${actor}:`, err);
+        return { data: { feed: [] } };
+      }),
     ),
   );
   const all = results.flatMap((r) => (r.data.feed || []) as TimelineItem[]);

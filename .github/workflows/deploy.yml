@@ -97,6 +97,10 @@ jobs:
           cp dist/purplesky/index.html dist/404.html 2>/dev/null || true
           # Do NOT create dist/index.html - it would shadow dist/purplesky/index.html on GitHub Pages
 
+          # Disable Jekyll processing (required for serving JS/CSS/JSON files)
+          touch dist/.nojekyll
+          touch dist/purplesky/.nojekyll
+
           # Copy PWA assets
           cp public/sw.js dist/purplesky/sw.js 2>/dev/null || true
           cp public/manifest.json dist/purplesky/manifest.json 2>/dev/null || true
