@@ -68,49 +68,44 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
           VITE_BASE_PATH: '/purplesky/'
 
-      # Copy PWA assets and ensure SPA fallback
+      # Prepare output for GitHub Pages deployment
+      # NOTE: GitHub Pages for project repos (username.github.io/reponame/) already
+      # adds the repo name as a path prefix. The Qwik build with base='/purplesky/'
+      # puts files in dist/purplesky/. We upload dist/purplesky/ (not dist/) so
+      # files aren't double-nested under /purplesky/purplesky/.
       - name: Prepare dist
         run: |
-          # The static adapter generates files in dist/
-          # Find where index.html ended up
-          echo "=== dist/ ==="
-          ls -la dist/ || true
-          echo "=== dist/purplesky/ ==="
-          ls -la dist/purplesky/ || true
+          DEPLOY_DIR="dist/purplesky"
 
-          # If index.html is in dist/purplesky/, we're good
-          # If not, check other locations
-          if [ -f dist/purplesky/index.html ]; then
-            echo "Found index.html in dist/purplesky/"
-          elif [ -f dist/index.html ]; then
-            echo "Found index.html in dist/"
-          else
-            echo "::error::No index.html found"
+          echo "=== Contents of $DEPLOY_DIR ==="
+          ls -la "$DEPLOY_DIR" || { echo "::error::$DEPLOY_DIR not found"; exit 1; }
+
+          if [ ! -f "$DEPLOY_DIR/index.html" ]; then
+            echo "::error::No index.html found in $DEPLOY_DIR"
             exit 1
           fi
 
-          # SPA fallback for client-side routing
-          if [ -f dist/purplesky/index.html ]; then
-            cp dist/purplesky/index.html dist/purplesky/404.html
-          fi
-          # Root 404 for SPA fallback on unknown routes
-          cp dist/purplesky/index.html dist/404.html 2>/dev/null || true
-          # Do NOT create dist/index.html - it would shadow dist/purplesky/index.html on GitHub Pages
+          # SPA fallback: copy index.html to 404.html for client-side routing
+          cp "$DEPLOY_DIR/index.html" "$DEPLOY_DIR/404.html"
 
           # Disable Jekyll processing (required for serving JS/CSS/JSON files)
-          touch dist/.nojekyll
-          touch dist/purplesky/.nojekyll
+          touch "$DEPLOY_DIR/.nojekyll"
 
-          # Copy PWA assets
-          cp public/sw.js dist/purplesky/sw.js 2>/dev/null || true
-          cp public/manifest.json dist/purplesky/manifest.json 2>/dev/null || true
-          cp public/icon.svg dist/purplesky/icon.svg 2>/dev/null || true
-          cp public/client-metadata.json dist/purplesky/client-metadata.json 2>/dev/null || true
+          # Ensure PWA assets are present
+          cp public/sw.js "$DEPLOY_DIR/sw.js" 2>/dev/null || true
+          cp public/manifest.json "$DEPLOY_DIR/manifest.json" 2>/dev/null || true
+          cp public/icon.svg "$DEPLOY_DIR/icon.svg" 2>/dev/null || true
+          cp public/client-metadata.json "$DEPLOY_DIR/client-metadata.json" 2>/dev/null || true
+
+          echo "=== Final contents ==="
+          ls -la "$DEPLOY_DIR"
 
       # Upload artifact for GitHub Pages
+      # Upload dist/purplesky/ (not dist/) because GitHub Pages project sites
+      # already serve at /reponame/ — uploading dist/ would double the prefix.
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: dist/purplesky
 
   deploy:
     needs: build
