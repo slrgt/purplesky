@@ -61,21 +61,22 @@ jobs:
         run: npm ci
 
       # Build the Qwik app (client + SSR with static adapter + lint)
+      # Base path and origin match repo so any repo (e.g. purplesky-1) gets its own Pages URL.
       - name: Build
         run: npx qwik build
         env:
           CI: true
           NODE_OPTIONS: '--max-old-space-size=4096'
-          VITE_BASE_PATH: '/purplesky/'
+          VITE_BASE_PATH: '/${{ github.event.repository.name }}/'
+          VITE_ORIGIN: 'https://${{ github.event.repository.owner }}.github.io'
 
       # Prepare output for GitHub Pages deployment
-      # NOTE: GitHub Pages for project repos (username.github.io/reponame/) already
-      # adds the repo name as a path prefix. The Qwik build with base='/purplesky/'
-      # puts files in dist/purplesky/. We upload dist/purplesky/ (not dist/) so
-      # files aren't double-nested under /purplesky/purplesky/.
+      # GitHub Pages project sites serve at username.github.io/REPO_NAME/.
+      # Build output goes to dist/REPO_NAME/; we upload that folder so paths match.
       - name: Prepare dist
         run: |
-          DEPLOY_DIR="dist/purplesky"
+          REPO_NAME="${{ github.event.repository.name }}"
+          DEPLOY_DIR="dist/${REPO_NAME}"
 
           echo "=== Contents of $DEPLOY_DIR ==="
           ls -la "$DEPLOY_DIR" || { echo "::error::$DEPLOY_DIR not found"; exit 1; }
@@ -101,11 +102,9 @@ jobs:
           ls -la "$DEPLOY_DIR"
 
       # Upload artifact for GitHub Pages
-      # Upload dist/purplesky/ (not dist/) because GitHub Pages project sites
-      # already serve at /reponame/ — uploading dist/ would double the prefix.
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist/purplesky
+          path: dist/${{ github.event.repository.name }}
 
   deploy:
     needs: build

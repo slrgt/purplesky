@@ -13,6 +13,7 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 
 const base = process.env.VITE_BASE_PATH ?? '/purplesky/';
+const origin = process.env.VITE_ORIGIN ?? 'https://x1nn1x.github.io';
 
 export default defineConfig({
   base,
@@ -22,7 +23,7 @@ export default defineConfig({
     wasm(),
     topLevelAwait(),
     staticAdapter({
-      origin: 'https://x1nn1x.github.io',
+      origin,
     }),
   ],
   resolve: {
