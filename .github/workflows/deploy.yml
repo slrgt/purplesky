@@ -1,0 +1,100 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# GitHub Pages Deployment for PurpleSky
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# This workflow:
+#  1. Installs Rust + wasm-pack for WASM compilation
+#  2. Builds the WASM module from wasm/src/lib.rs
+#  3. Installs Node.js dependencies
+#  4. Builds the Qwik app (static site generation)
+#  5. Deploys to GitHub Pages
+#
+# HOW TO EDIT:
+#  - To change the deploy branch, edit the "on.push.branches" trigger
+#  - To change the base path, edit VITE_BASE_PATH
+#  - To add environment variables, add them to the Build step's env
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install Rust toolchain for WASM compilation
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Install wasm-pack
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # Build WASM module
+      - name: Build WASM
+        run: cd wasm && wasm-pack build --target web --out-dir ../src/wasm-pkg
+
+      # Set up Node.js
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Build the Qwik app
+      - name: Build
+        run: npx qwik build
+        env:
+          CI: true
+          NODE_OPTIONS: '--max-old-space-size=4096'
+          VITE_BASE_PATH: '/purplesky/'
+
+      # Verify build output
+      - name: Verify build
+        run: |
+          if [ ! -f dist/index.html ]; then
+            echo "::error::Build failed: dist/index.html not found"
+            exit 1
+          fi
+
+      # Copy service worker and PWA assets
+      - name: Copy PWA assets
+        run: |
+          cp public/sw.js dist/sw.js 2>/dev/null || true
+          cp public/manifest.json dist/manifest.json 2>/dev/null || true
+          cp public/icon.svg dist/icon.svg 2>/dev/null || true
+          cp public/client-metadata.json dist/client-metadata.json 2>/dev/null || true
+
+      # Upload artifact for GitHub Pages
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

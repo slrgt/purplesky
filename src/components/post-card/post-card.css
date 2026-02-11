@@ -1,0 +1,185 @@
+/*
+ * Post Card Styles
+ *
+ * HOW TO EDIT:
+ *  - To change card appearance, edit .post-card
+ *  - To change hover effect, edit .post-card:hover
+ *  - To change seen post appearance, edit .post-card-seen
+ *  - Media sizing: controlled by aspect-ratio on the img element
+ */
+
+.post-card {
+  overflow: hidden;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.post-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+}
+
+/* Seen posts are slightly dimmed */
+.post-card-seen {
+  opacity: 0.5;
+}
+.post-card-seen:hover {
+  opacity: 0.8;
+}
+
+/* Post is saved in at least one collection */
+.post-card-in-collection {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ── Media ─────────────────────────────────────────────────────────────── */
+.post-media-link {
+  display: block;
+  text-decoration: none;
+}
+
+.post-media-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--glass-radius) var(--glass-radius) 0 0;
+  background: var(--surface);
+}
+
+.post-media-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  max-height: 500px;
+}
+
+.post-media-count {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  background: var(--media-control-bg);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 100px;
+}
+
+.post-video-wrap {
+  position: relative;
+}
+
+.post-video-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.post-nsfw-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  gap: var(--space-xs);
+  backdrop-filter: blur(30px);
+}
+.post-nsfw-overlay span {
+  font-weight: 600;
+}
+.post-nsfw-overlay small {
+  font-size: var(--font-xs);
+}
+
+/* ── Meta (Author Row) ─────────────────────────────────────────────────── */
+.post-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-sm) 0;
+  gap: var(--space-sm);
+}
+
+.post-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: var(--text);
+  min-width: 0;
+  flex: 1;
+}
+
+.post-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.post-handle {
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.post-time {
+  font-size: var(--font-xs);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* ── Text ──────────────────────────────────────────────────────────────── */
+.post-text-link {
+  display: block;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.post-text {
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* ── Actions ───────────────────────────────────────────────────────────── */
+.post-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-xs) var(--space-sm);
+}
+
+.post-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: var(--font-xs);
+  color: var(--muted);
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  min-width: auto;
+  min-height: auto;
+}
+
+.post-action:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+}
+
+.post-action-active {
+  color: var(--error);
+}
