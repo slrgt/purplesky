@@ -55,8 +55,7 @@ export default component$(() => {
 
     // Restore session
     try {
-      const { resumeSession, getSession, requestPersistentStorage } = await import('~/lib/bsky');
-      requestPersistentStorage();
+      const { resumeSession, getSession } = await import('~/lib/bsky');
 
       // Check for OAuth callback
       const params = new URLSearchParams(window.location.search);

@@ -10,14 +10,27 @@
  *  - The <body> renders RouterOutlet which shows the current route
  */
 
-import { component$ } from '@builder.io/qwik';
-import {
-  QwikCityProvider,
-  RouterOutlet,
-  ServiceWorkerRegister,
-} from '@builder.io/qwik-city';
+import { component$, useVisibleTask$ } from '@builder.io/qwik';
+import { QwikCityProvider, RouterOutlet } from '@builder.io/qwik-city';
 
 import './global.css';
+
+/** Register the service worker only on mobile or when installed as PWA to avoid "persistent storage" prompts on desktop. */
+const ServiceWorkerRegisterConditional = component$(() => {
+  useVisibleTask$(() => {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    const isMobile =
+      /Mobi|Android|iPhone|iPad|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true;
+    if (!isStandalone && !isMobile) return;
+    const swUrl = new URL('./sw.js', window.location.href).pathname;
+    navigator.serviceWorker.register(swUrl).catch((e) => console.error('SW register failed:', e));
+  });
+  return null;
+});
 
 export default component$(() => {
   return (
@@ -44,7 +57,7 @@ export default component$(() => {
           Skip to content
         </a>
         <RouterOutlet />
-        <ServiceWorkerRegister />
+        <ServiceWorkerRegisterConditional />
       </body>
     </QwikCityProvider>
   );

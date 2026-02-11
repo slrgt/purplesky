@@ -57,15 +57,6 @@ let oauthSessionRef: { signOut(): Promise<void> } | null = null;
 
 // ── Session Persistence ───────────────────────────────────────────────────
 
-/** Ask browser to keep our storage (helps PWA stay logged in). */
-export function requestPersistentStorage(): void {
-  try {
-    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
-      void navigator.storage.persist();
-    }
-  } catch { /* ignore */ }
-}
-
 function getAccounts(): AccountsStore {
   try {
     const raw = localStorage.getItem(ACCOUNTS_KEY);
