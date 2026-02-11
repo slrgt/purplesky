@@ -68,17 +68,33 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
           VITE_BASE_PATH: '/purplesky/'
 
-      # Verify build output
-      - name: Verify build
+      # Create an index.html at root that redirects into the base path,
+      # and ensure the SPA works with direct navigation on GitHub Pages.
+      - name: Prepare dist
         run: |
+          DIST_DIR=dist/purplesky
+          # If the build put files under dist/purplesky/ move everything up
+          if [ -d "$DIST_DIR" ] && [ ! -f dist/index.html ]; then
+            echo "Moving dist/purplesky/* → dist/"
+            cp -r "$DIST_DIR"/* dist/
+          fi
+          # Verify build
+          ls -la dist/
           if [ ! -f dist/index.html ]; then
             echo "::error::Build failed: dist/index.html not found"
             exit 1
           fi
+          # SPA fallback: copy index.html to 404.html so GitHub Pages serves it for all routes
+          cp dist/index.html dist/404.html
 
       # Copy service worker and PWA assets
       - name: Copy PWA assets
         run: |
+          cp public/sw.js dist/purplesky/sw.js 2>/dev/null || true
+          cp public/manifest.json dist/purplesky/manifest.json 2>/dev/null || true
+          cp public/icon.svg dist/purplesky/icon.svg 2>/dev/null || true
+          cp public/client-metadata.json dist/purplesky/client-metadata.json 2>/dev/null || true
+          # Also copy to root dist in case we flattened
           cp public/sw.js dist/sw.js 2>/dev/null || true
           cp public/manifest.json dist/manifest.json 2>/dev/null || true
           cp public/icon.svg dist/icon.svg 2>/dev/null || true
