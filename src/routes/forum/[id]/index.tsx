@@ -237,7 +237,7 @@ export default component$(() => {
                 replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [p.uri]: Math.max(0, (replyDownvoteCounts.value[p.uri] ?? 0) - 1) };
               }) : undefined}
               replyCount={p.replyCount ?? replies.value.length}
-              replyHref={`/forum/${encodeURIComponent(postUri)}/`}
+              replyHref={withBase(`/forum/${encodeURIComponent(postUri)}/`)}
             />
           </div>
         )}

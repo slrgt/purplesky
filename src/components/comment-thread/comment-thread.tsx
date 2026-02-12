@@ -173,7 +173,7 @@ const CommentNode = component$<{
               <FollowAvatar
                 authorDid={reply.author.did}
                 followUri={(reply.author as { viewer?: { following?: string } }).viewer?.following}
-                profilePath={`/profile/${encodeURIComponent(reply.author.handle)}/`}
+                profilePath={withBase(`/profile/${encodeURIComponent(reply.author.handle)}/`)}
                 avatarUrl={reply.author.avatar ? resizedAvatarUrl(reply.author.avatar, 20) : undefined}
                 size={20}
               />
@@ -221,7 +221,7 @@ const CommentNode = component$<{
                     onDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'downvote'); }) : undefined}
                     onUndoDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'undo'); }) : undefined}
                     replyCount={childCount}
-                    replyHref={depth >= MAX_DEPTH ? `/forum/${encodeURIComponent(postUri)}/` : undefined}
+                    replyHref={depth >= MAX_DEPTH ? withBase(`/forum/${encodeURIComponent(postUri)}/`) : undefined}
                     onReplyClick$={depth < MAX_DEPTH ? () => { showReply.value = !showReply.value; } : undefined}
                     compact
                   />
