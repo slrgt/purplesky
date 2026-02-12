@@ -132,8 +132,7 @@ export default component$(() => {
     try {
       const { deleteForumPost } = await import('~/lib/forum');
       await deleteForumPost(postUri);
-      const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-      nav(`${base}/forum/`);
+      nav('/forum/');
     } catch (err) {
       console.error('Failed to delete:', err);
     }

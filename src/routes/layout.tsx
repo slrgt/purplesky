@@ -37,6 +37,11 @@ export default component$(() => {
   const navSearchOpen = useSignal(false);
   const navSearchQuery = useSignal('');
   const navSearchRef = useSignal<HTMLInputElement>();
+  const navSearchSuggestions = useSignal<Array<{ did: string; handle: string; displayName?: string; avatar?: string }>>([]);
+  const navSearchSuggestionsLoading = useSignal(false);
+  const navSearchShowSuggestions = useSignal(false);
+  const navSearchSuggestionsRef = useSignal<HTMLElement>();
+  const navSearchSelectedIndex = useSignal(0);
 
   // Auto-dismiss global toast after 2.5s
   useVisibleTask$(({ track, cleanup }) => {
@@ -166,6 +171,38 @@ export default component$(() => {
       });
     };
     const t = setTimeout(() => tryRestore(4), 50);
+    cleanup(() => clearTimeout(t));
+  });
+
+  // ── Nav search typeahead (when floating search is open) ─────────────────
+  useVisibleTask$(({ track, cleanup }) => {
+    track(() => navSearchOpen.value);
+    track(() => navSearchQuery.value);
+    if (!navSearchOpen.value) {
+      navSearchSuggestions.value = [];
+      navSearchShowSuggestions.value = false;
+      return;
+    }
+    const q = navSearchQuery.value.trim();
+    if (q.length < 2) {
+      navSearchSuggestions.value = [];
+      navSearchShowSuggestions.value = false;
+      return;
+    }
+    const t = setTimeout(async () => {
+      navSearchSuggestionsLoading.value = true;
+      try {
+        const { searchActorsTypeahead } = await import('~/lib/bsky');
+        const res = await searchActorsTypeahead(q, 8);
+        const actors = (res as { actors?: Array<{ did: string; handle: string; displayName?: string; avatar?: string }> }).actors ?? [];
+        navSearchSuggestions.value = actors;
+        navSearchShowSuggestions.value = actors.length > 0;
+        navSearchSelectedIndex.value = 0;
+      } catch {
+        navSearchSuggestions.value = [];
+      }
+      navSearchSuggestionsLoading.value = false;
+    }, 250);
     cleanup(() => clearTimeout(t));
   });
 
@@ -411,8 +448,7 @@ export default component$(() => {
       // / = go to search page
       if (key === '/') {
         e.preventDefault();
-        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-        nav(`${base}/search/`);
+        nav('/search/');
         return;
       }
 
@@ -447,10 +483,12 @@ export default component$(() => {
   ];
 
   const pathname = loc.url.pathname;
-  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '/';
-  const pathAfterBase = pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+  const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
   const isHome = pathAfterBase === '/' || pathAfterBase === '';
   const showBackButton = !isHome;
+  /** Full href for nav items (include base so bottom nav works when deployed at subpath) */
+  const navHref = (path: string) => (path === '/' ? `${base}/` : `${base}${path}`);
 
   return (
     <div class="app-shell">
@@ -504,10 +542,7 @@ export default component$(() => {
                         onClick$={async () => {
                           const handle = store.session.handle;
                           accountMenuOpen.value = false;
-                          if (handle) {
-                            const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-                            await nav(`${base}/profile/${encodeURIComponent(handle)}/`);
-                          }
+                          if (handle) await nav(`/profile/${encodeURIComponent(handle)}/`);
                         }}
                       >
                         {store.session.avatar ? (
@@ -678,10 +713,9 @@ export default component$(() => {
         <Slot />
       </main>
 
-      {/* ── Bottom Navigation (iOS-style floating tab bar) ─────────────── */}
-      <nav class="nav glass" aria-label="Main navigation" role="tablist">
-        {navSearchOpen.value ? (
-          /* ── Expanded search bar ── */
+      {/* ── Floating search panel (above nav, when search is open) ───────── */}
+      {navSearchOpen.value && (
+        <div class="nav-search-float glass" ref={navSearchSuggestionsRef}>
           <form
             class="nav-search-bar"
             preventdefault:submit
@@ -690,8 +724,8 @@ export default component$(() => {
               if (q) {
                 navSearchOpen.value = false;
                 navSearchQuery.value = '';
-                const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-                await nav(`${base}/search/?q=${encodeURIComponent(q)}`);
+                navSearchShowSuggestions.value = false;
+                await nav(`/search/?q=${encodeURIComponent(q)}`);
               }
             }}
           >
@@ -699,16 +733,61 @@ export default component$(() => {
               ref={navSearchRef}
               type="text"
               class="nav-search-input"
-              placeholder="Search…"
+              placeholder="Search people or posts…"
               autoFocus
               bind:value={navSearchQuery}
-              onKeyDown$={(e) => {
-                if ((e as KeyboardEvent).key === 'Escape') {
+              onFocus$={() => { if (navSearchSuggestions.value.length > 0) navSearchShowSuggestions.value = true; navSearchSelectedIndex.value = 0; }}
+              onBlur$={() => { setTimeout(() => { navSearchShowSuggestions.value = false; }, 180); }}
+              onKeyDown$={async (e) => {
+                const ev = e as KeyboardEvent;
+                const showing = navSearchShowSuggestions.value && (navSearchSuggestions.value.length > 0 || navSearchQuery.value.trim().length >= 2);
+                const total = 1 + navSearchSuggestions.value.length;
+                if (ev.key === 'Escape') {
                   navSearchOpen.value = false;
                   navSearchQuery.value = '';
+                  navSearchShowSuggestions.value = false;
+                  return;
+                }
+                if (showing && total > 0) {
+                  if (ev.key === 'ArrowDown') {
+                    e.preventDefault();
+                    navSearchSelectedIndex.value = Math.min(navSearchSelectedIndex.value + 1, total - 1);
+                    return;
+                  }
+                  if (ev.key === 'ArrowUp') {
+                    e.preventDefault();
+                    navSearchSelectedIndex.value = Math.max(navSearchSelectedIndex.value - 1, 0);
+                    return;
+                  }
+                  if (ev.key === 'Enter' || ((ev.ctrlKey || ev.metaKey) && ev.key === 'e')) {
+                    e.preventDefault();
+                    const idx = navSearchSelectedIndex.value;
+                    if (idx === 0) {
+                      const q = navSearchQuery.value.trim();
+                      if (q) {
+                        navSearchOpen.value = false;
+                        navSearchQuery.value = '';
+                        navSearchShowSuggestions.value = false;
+                        await nav(`/search/?q=${encodeURIComponent(q)}`);
+                      }
+                    } else {
+                      const actor = navSearchSuggestions.value[idx - 1];
+                      if (actor) {
+                        navSearchOpen.value = false;
+                        navSearchQuery.value = '';
+                        navSearchShowSuggestions.value = false;
+                        await nav(navHref(`/profile/${encodeURIComponent(actor.handle)}/`));
+                      }
+                    }
+                  }
                 }
               }}
             />
+            {navSearchSuggestionsLoading.value && (
+              <div class="nav-search-spinner">
+                <div class="spinner" />
+              </div>
+            )}
             <button type="submit" class="nav-search-go" aria-label="Search">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5">
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -718,47 +797,90 @@ export default component$(() => {
               type="button"
               class="nav-search-close"
               aria-label="Close search"
-              onClick$={() => { navSearchOpen.value = false; navSearchQuery.value = ''; }}
+              onClick$={() => { navSearchOpen.value = false; navSearchQuery.value = ''; navSearchShowSuggestions.value = false; }}
             >
               ✕
             </button>
           </form>
-        ) : (
-          /* ── Normal nav tabs + search button ── */
-          <>
-            {navItems.map((item) => {
-              const isActive = loc.url.pathname === item.href ||
-                (item.href !== '/' && loc.url.pathname.startsWith(item.href));
-              return (
+          {navSearchShowSuggestions.value && (navSearchSuggestions.value.length > 0 || navSearchQuery.value.trim().length >= 2) && (
+            <div class="nav-search-suggestions">
+              <button
+                type="button"
+                class={`nav-search-suggestion-row nav-search-suggestion-all ${navSearchSelectedIndex.value === 0 ? 'nav-search-suggestion-selected' : ''}`}
+                onClick$={async () => {
+                  const q = navSearchQuery.value.trim();
+                  if (q) {
+                    navSearchOpen.value = false;
+                    navSearchQuery.value = '';
+                    navSearchShowSuggestions.value = false;
+                    await nav(`/search/?q=${encodeURIComponent(q)}`);
+                  }
+                }}
+                onMouseEnter$={() => { navSearchSelectedIndex.value = 0; }}
+              >
+                <span class="nav-search-suggestion-all-icon">🔍</span>
+                <span>Search posts for "{navSearchQuery.value.trim()}"</span>
+              </button>
+              {navSearchSuggestions.value.map((actor, i) => (
                 <Link
-                  key={item.href}
-                  href={item.href}
-                  class={`nav-tab ${isActive ? 'nav-tab-active' : ''}`}
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-label={item.label}
+                  key={actor.did}
+                  href={navHref(`/profile/${encodeURIComponent(actor.handle)}/`)}
+                  class={`nav-search-suggestion-row ${navSearchSelectedIndex.value === i + 1 ? 'nav-search-suggestion-selected' : ''}`}
+                  onClick$={() => {
+                    navSearchOpen.value = false;
+                    navSearchQuery.value = '';
+                    navSearchShowSuggestions.value = false;
+                  }}
+                  onMouseEnter$={() => { navSearchSelectedIndex.value = i + 1; }}
                 >
-                  <NavIcon name={item.icon} active={isActive} />
-                  <span class="nav-label">{item.label}</span>
+                  {actor.avatar && (
+                    <img src={actor.avatar} alt="" width="32" height="32" style={{ borderRadius: '50%', flexShrink: 0 }} />
+                  )}
+                  <div class="nav-search-suggestion-info">
+                    {actor.displayName && <span class="nav-search-suggestion-name">{actor.displayName}</span>}
+                    <span class="nav-search-suggestion-handle">@{actor.handle}</span>
+                  </div>
                 </Link>
-              );
-            })}
-            <button
-              type="button"
-              class={`nav-tab ${loc.url.pathname.startsWith('/search') ? 'nav-tab-active' : ''}`}
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Bottom Navigation (always visible; search opens panel above) ─── */}
+      <nav class="nav glass" aria-label="Main navigation" role="tablist">
+        {navItems.map((item) => {
+          const fullHref = navHref(item.href);
+          const isActive = pathname === fullHref ||
+            (item.href !== '/' && pathname.startsWith(fullHref));
+          return (
+            <Link
+              key={item.href}
+              href={fullHref}
+              class={`nav-tab ${isActive ? 'nav-tab-active' : ''}`}
               role="tab"
-              aria-label="Search"
-              onClick$={() => {
-                navSearchOpen.value = true;
-                // Auto-focus after render
-                setTimeout(() => navSearchRef.value?.focus(), 50);
-              }}
+              aria-selected={isActive}
+              aria-label={item.label}
             >
-              <NavIcon name="search" active={loc.url.pathname.startsWith('/search')} />
-              <span class="nav-label">Search</span>
-            </button>
-          </>
-        )}
+              <NavIcon name={item.icon} active={isActive} />
+              <span class="nav-label">{item.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          class={`nav-tab ${pathname.startsWith(navHref('/search')) || navSearchOpen.value ? 'nav-tab-active' : ''}`}
+          role="tab"
+          aria-label="Search"
+          aria-expanded={navSearchOpen.value}
+          onClick$={() => {
+            navSearchOpen.value = !navSearchOpen.value;
+            if (navSearchOpen.value) setTimeout(() => navSearchRef.value?.focus(), 50);
+          }}
+        >
+          <NavIcon name="search" active={pathname.startsWith(navHref('/search')) || navSearchOpen.value} />
+          <span class="nav-label">Search</span>
+        </button>
       </nav>
 
       {/* ── Login Modal ────────────────────────────────────────────────── */}
@@ -874,6 +996,7 @@ const LoginModal = component$(() => {
   const suggestions = useSignal<Array<{ did: string; handle: string; displayName?: string; avatar?: string }>>([]);
   const suggestionsLoading = useSignal(false);
   const showSuggestions = useSignal(false);
+  const loginSelectedIndex = useSignal(0);
   const loginError = useSignal('');
   const loginLoading = useSignal(false);
   const suggestionsRef = useSignal<HTMLElement>();
@@ -895,6 +1018,7 @@ const LoginModal = component$(() => {
         const actors = (res as { actors?: Array<{ did: string; handle: string; displayName?: string; avatar?: string }> }).actors ?? [];
         suggestions.value = actors;
         showSuggestions.value = actors.length > 0;
+        loginSelectedIndex.value = 0;
       } catch {
         suggestions.value = [];
       }
@@ -906,6 +1030,14 @@ const LoginModal = component$(() => {
   const selectSuggestion = $((handle: string) => {
     handleInput.value = handle;
     showSuggestions.value = false;
+  });
+
+  const selectSuggestionByIndex = $(() => {
+    const list = suggestions.value;
+    if (list.length === 0) return;
+    const idx = Math.max(0, Math.min(loginSelectedIndex.value, list.length - 1));
+    const actor = list[idx];
+    if (actor) selectSuggestion(actor.handle);
   });
 
   const handleOAuthLogin = $(async (handle: string) => {
@@ -944,8 +1076,27 @@ const LoginModal = component$(() => {
               class="modal-input"
               autoFocus
               bind:value={handleInput}
-              onFocus$={() => { if (suggestions.value.length > 0) showSuggestions.value = true; }}
+              onFocus$={() => { if (suggestions.value.length > 0) showSuggestions.value = true; loginSelectedIndex.value = 0; }}
               onBlur$={() => { setTimeout(() => { showSuggestions.value = false; }, 200); }}
+              onKeyDown$={(e) => {
+                const ev = e as KeyboardEvent;
+                if (!showSuggestions.value || suggestions.value.length === 0) return;
+                const n = suggestions.value.length;
+                if (ev.key === 'ArrowDown') {
+                  e.preventDefault();
+                  loginSelectedIndex.value = Math.min(loginSelectedIndex.value + 1, n - 1);
+                  return;
+                }
+                if (ev.key === 'ArrowUp') {
+                  e.preventDefault();
+                  loginSelectedIndex.value = Math.max(loginSelectedIndex.value - 1, 0);
+                  return;
+                }
+                if (ev.key === 'Enter' || ((ev.ctrlKey || ev.metaKey) && ev.key === 'e')) {
+                  e.preventDefault();
+                  selectSuggestionByIndex();
+                }
+              }}
             />
             {/* Typeahead suggestions dropdown */}
             {showSuggestions.value && suggestions.value.length > 0 && (
@@ -954,19 +1105,14 @@ const LoginModal = component$(() => {
                 borderRadius: 'var(--glass-radius-sm)', overflow: 'hidden',
                 maxHeight: '240px', overflowY: 'auto',
               }}>
-                {suggestions.value.map((actor) => (
+                {suggestions.value.map((actor, i) => (
                   <button
                     key={actor.did}
                     type="button"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 'var(--space-sm)',
-                      width: '100%', padding: 'var(--space-sm) var(--space-md)',
-                      textAlign: 'left', background: 'none', border: 'none',
-                      color: 'var(--text)', cursor: 'pointer', fontSize: 'var(--font-sm)',
-                      minHeight: 'auto',
-                    }}
+                    class={i === loginSelectedIndex.value ? 'login-suggestion-item login-suggestion-selected' : 'login-suggestion-item'}
                     onClick$={() => selectSuggestion(actor.handle)}
                     onMouseDown$={(e) => e.preventDefault()}
+                    onMouseEnter$={() => { loginSelectedIndex.value = i; }}
                   >
                     {actor.avatar && (
                       <img src={actor.avatar} alt="" width="28" height="28" style={{ borderRadius: '50%', flexShrink: 0 }} />

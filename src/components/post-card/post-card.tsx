@@ -197,9 +197,7 @@ export const PostCard = component$<PostCardProps>(({
     return `${days}d`;
   })();
 
-  // Encode URI for routing. Use full path (with base) only for programmatic nav so mobile doesn't 404 on GitHub Pages.
-  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-  const postPathForNav = `${base}/post/${encodeURIComponent(post.uri)}/`;
+  // Encode URI for routing (router-relative; Qwik adds base when deployed)
   const postPath = `/post/${encodeURIComponent(post.uri)}/`;
   const profilePath = `/profile/${encodeURIComponent(post.author.handle)}/`;
 
@@ -210,10 +208,10 @@ export const PostCard = component$<PostCardProps>(({
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
-      onClick$={() => nav(postPathForNav)}
+      onClick$={() => nav(postPath)}
       role="button"
       tabIndex={0}
-      onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(postPathForNav); } }}
+      onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(postPath); } }}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}
       {hasMedia && (

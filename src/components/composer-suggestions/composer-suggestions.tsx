@@ -184,7 +184,7 @@ export const ComposerSuggestions = component$<ComposerSuggestionsProps>(({
             selectedIndex.value = Math.max(selectedIndex.value - 1, 0);
             return;
           }
-          if (e.key === 'Enter' || e.key === 'Tab') {
+          if (e.key === 'Enter' || e.key === 'Tab' || ((e.ctrlKey || e.metaKey) && e.key === 'e')) {
             e.preventDefault();
             const item = items.value[selectedIndex.value];
             if (item) replaceTriggerAndQuery(item.value);
