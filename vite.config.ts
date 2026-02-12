@@ -15,6 +15,8 @@
  */
 
 import { defineConfig, type Plugin } from 'vite';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { qwikVite } from '@builder.io/qwik/optimizer';
 import { qwikCity } from '@builder.io/qwik-city/vite';
 import wasm from 'vite-plugin-wasm';
@@ -64,12 +66,33 @@ function pwaManifestPlugin(basePath: string): Plugin {
   };
 }
 
+/** In dev, serve public/client-metadata.json at base path so OAuth can fetch it when base !== '/'. */
+function clientMetadataDevPlugin(basePath: string): Plugin {
+  return {
+    name: 'client-metadata-dev',
+    apply: 'serve',
+    configureServer(server) {
+      if (basePath === '/' || basePath === '') return;
+      const path = basePath.replace(/\/$/, '') + '/client-metadata.json';
+      server.middlewares.use((req, res, next) => {
+        const reqPath = req.url?.split('?')[0] ?? '';
+        if (reqPath !== path && reqPath !== path.replace(/^\//, '')) return next();
+        const publicPath = join(process.cwd(), 'public', 'client-metadata.json');
+        if (!existsSync(publicPath)) return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(readFileSync(publicPath, 'utf-8'));
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base,
   plugins: [
     /* QwikCity must come before qwikVite */
     qwikCity(),
     qwikVite(),
+    clientMetadataDevPlugin(base),
     /* WASM plugins: allow importing .wasm as ES modules */
     wasm(),
     topLevelAwait(),

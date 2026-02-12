@@ -20,11 +20,12 @@ import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 
 let client: BrowserOAuthClient | null = null;
 
-/** Get the app's base URL (origin + path without trailing index.html). */
+/** Get the app's base URL (origin + base path only). Uses BASE_URL so client-metadata is always at app root, not under deep routes. */
 function getAppBaseUrl(): string {
   const u = new URL(window.location.href);
-  const path = u.pathname.replace(/\/index\.html$/, '').replace(/\/?$/, '') || '/';
-  return `${u.origin}${path}`;
+  const base = (typeof import.meta.env !== 'undefined' && import.meta.env?.BASE_URL) || '/';
+  const basePath = base.replace(/\/$/, '') || '';
+  return `${u.origin}${basePath}`;
 }
 
 /** Check if running on localhost (development). */
