@@ -34,8 +34,8 @@ const scrollRestoreState = { restoring: false };
 /** Guard: only allow link/button activation after a real pointer down+up on the same element (stops hover-triggered phantom clicks). */
 const clickGuardState = { pointerDownEl: null as Element | null, pointerUpReceived: false };
 
-/** Last time a pointer event occurred; used to block Enter/Space activating links when focus came from hover (spurious key). */
-let lastPointerTime = 0;
+/** Last time a pointer event occurred; used to block Enter/Space activating links when focus came from hover. Stored in object to avoid illegal reassignment of import in serialized chunks. */
+const pointerGuardState = { lastPointerTime: 0 };
 const POINTER_TO_KEY_MS = 500;
 
 export default component$(() => {
@@ -165,7 +165,7 @@ export default component$(() => {
       e.pointerType === 'touch' ||
       (e.pointerType === 'pen' && e.isPrimary);
     const onPointerDown = (e: PointerEvent) => {
-      lastPointerTime = Date.now();
+      pointerGuardState.lastPointerTime = Date.now();
       if (!isRealPointerDown(e)) return;
       const el = (e.target as Element).closest(sel);
       if (el) {
@@ -195,14 +195,14 @@ export default component$(() => {
       }
     };
     // Track pointer movement so we know when focus might have come from hover (not just pointerdown)
-    const onPointerMove = () => { lastPointerTime = Date.now(); };
+    const onPointerMove = () => { pointerGuardState.lastPointerTime = Date.now(); };
 
     // Block Enter/Space activating a link/button when focus likely came from hover (spurious key or a11y sending key on focus)
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const interactive = (e.target as Element).closest?.('a[href], button');
       if (!interactive) return;
-      if (Date.now() - lastPointerTime < POINTER_TO_KEY_MS) {
+      if (Date.now() - pointerGuardState.lastPointerTime < POINTER_TO_KEY_MS) {
         e.preventDefault();
         e.stopImmediatePropagation();
       }
