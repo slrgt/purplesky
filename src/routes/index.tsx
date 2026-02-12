@@ -511,7 +511,8 @@ export default component$(() => {
       // E = Enter/open post
       if (key === 'e') {
         e.preventDefault();
-        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+        nav(`${base}/post/${encodeURIComponent(item.post.uri)}/`);
         return;
       }
 
@@ -535,7 +536,8 @@ export default component$(() => {
       // R = Reply (navigate to post with reply intent)
       if (key === 'r') {
         e.preventDefault();
-        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+        nav(`${base}/post/${encodeURIComponent(item.post.uri)}/`);
         return;
       }
     };

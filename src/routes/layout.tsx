@@ -411,7 +411,8 @@ export default component$(() => {
       // / = go to search page
       if (key === '/') {
         e.preventDefault();
-        nav('/search/');
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+        nav(`${base}/search/`);
         return;
       }
 
@@ -503,7 +504,10 @@ export default component$(() => {
                         onClick$={async () => {
                           const handle = store.session.handle;
                           accountMenuOpen.value = false;
-                          if (handle) await nav(`/profile/${encodeURIComponent(handle)}/`);
+                          if (handle) {
+                            const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+                            await nav(`${base}/profile/${encodeURIComponent(handle)}/`);
+                          }
                         }}
                       >
                         {store.session.avatar ? (
@@ -686,7 +690,8 @@ export default component$(() => {
               if (q) {
                 navSearchOpen.value = false;
                 navSearchQuery.value = '';
-                await nav(`/search/?q=${encodeURIComponent(q)}`);
+                const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+                await nav(`${base}/search/?q=${encodeURIComponent(q)}`);
               }
             }}
           >
