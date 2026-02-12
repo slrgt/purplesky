@@ -26,7 +26,7 @@ import { ComposeModal } from '~/components/compose-modal/compose-modal';
 import './layout.css';
 
 /** Route sync runs only once per page load to avoid loops on static hosts (e.g. GitHub Pages). */
-let routeSyncDone = false;
+const routeSyncState = { done: false };
 
 export default component$(() => {
   const store = useAppProvider();
@@ -312,7 +312,7 @@ export default component$(() => {
     // Run only ONCE per page load so we never loop (e.g. on GitHub Pages
     // where nav() could otherwise be re-triggered).
     try {
-      if (routeSyncDone) return;
+      if (routeSyncState.done) return;
       const navEntry = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
       if (!navEntry || navEntry.type !== 'navigate') return;
       const params = new URLSearchParams(window.location.search);
@@ -323,7 +323,7 @@ export default component$(() => {
       const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
       const isHome = pathAfterBase === '/' || pathAfterBase === '' || pathname === base || pathname === base + '/';
       if (isHome) return;
-      routeSyncDone = true;
+      routeSyncState.done = true;
       const cleanSearch = window.location.search;
       const target = pathname + cleanSearch + window.location.hash;
       await nav(target);
