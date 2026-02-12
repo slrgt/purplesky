@@ -446,7 +446,10 @@ export default component$(() => {
   ];
 
   const pathname = loc.url.pathname;
-  const showBackButton = pathname !== '/' && pathname !== '';
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '/';
+  const pathAfterBase = pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+  const isHome = pathAfterBase === '/' || pathAfterBase === '';
+  const showBackButton = !isHome;
 
   return (
     <div class="app-shell">
