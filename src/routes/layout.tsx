@@ -28,6 +28,9 @@ import './layout.css';
 /** Route sync runs only once per page load to avoid loops on static hosts (e.g. GitHub Pages). */
 const routeSyncState = { done: false };
 
+/** Shared flag so scroll save skips history.replaceState during programmatic scroll restore (avoids "Too many Location/History API calls"). */
+const scrollRestoreState = { restoring: false };
+
 export default component$(() => {
   const store = useAppProvider();
   const loc = useLocation();
@@ -60,13 +63,15 @@ export default component$(() => {
   // Saves scroll position continuously. On back/forward (browser button,
   // mobile edge-swipe, Q key), restores exactly where you were.
   // Forward navigation (clicking a link) scrolls to top as normal.
+  // Throttles history.replaceState to avoid "Too many calls to Location or History APIs".
   useVisibleTask$(({ cleanup }) => {
-    // Disable the browser's built-in scroll restoration so we control it
     if ('scrollRestoration' in history) {
       history.scrollRestoration = 'manual';
     }
 
     const SCROLL_KEY = 'purplesky-scroll-positions';
+    const REPLACE_STATE_THROTTLE_MS = 800;
+    const scrollState = { lastReplaceStateTime: 0 };
 
     function getScrollMap(): Record<string, number> {
       try {
@@ -76,25 +81,26 @@ export default component$(() => {
     }
 
     function saveCurrentScroll() {
+      if (scrollRestoreState.restoring) return;
       const map = getScrollMap();
       map[location.pathname + location.search] = window.scrollY;
       try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(map)); } catch { /* ignore */ }
-      // Also embed in history.state for back/forward accuracy
+      const now = Date.now();
+      if (now - scrollState.lastReplaceStateTime < REPLACE_STATE_THROTTLE_MS) return;
+      scrollState.lastReplaceStateTime = now;
       try {
         const state = history.state ?? {};
         history.replaceState({ ...state, _scrollY: window.scrollY }, '');
       } catch { /* ignore */ }
     }
 
-    // Debounced scroll save — keeps position fresh as user scrolls
     let scrollTimer: ReturnType<typeof setTimeout> | null = null;
     const onScroll = () => {
       if (scrollTimer) clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(saveCurrentScroll, 100);
+      scrollTimer = setTimeout(saveCurrentScroll, 150);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
 
-    // Before internal link clicks, snapshot the scroll position immediately
     const onClickCapture = (e: Event) => {
       const anchor = (e.target as HTMLElement).closest('a');
       if (anchor && anchor.href && new URL(anchor.href).origin === location.origin) {
@@ -103,7 +109,6 @@ export default component$(() => {
     };
     document.addEventListener('click', onClickCapture, true);
 
-    // On popstate (back button, forward button, mobile swipe-back), restore scroll
     const onPopState = (e: PopStateEvent) => {
       const stateScroll = (e.state as { _scrollY?: number } | null)?._scrollY;
       const key = location.pathname + location.search;
@@ -113,20 +118,19 @@ export default component$(() => {
         : (getScrollMap()[key] ?? null);
       if (scrollTarget === null || scrollTarget === 0) return;
 
-      // Hide the page while we jump to the saved position so the user
-      // doesn't see the scroll animate down — they just appear there.
       const main = document.getElementById('main-content');
       if (main) main.style.visibility = 'hidden';
 
+      scrollRestoreState.restoring = true;
       const tryRestore = (attempts: number) => {
         requestAnimationFrame(() => {
           window.scrollTo({ top: scrollTarget, behavior: 'instant' as ScrollBehavior });
           if (attempts > 0) {
             setTimeout(() => tryRestore(attempts - 1), 60);
           } else {
-            // All attempts done — reveal the page at the final position
             requestAnimationFrame(() => {
               if (main) main.style.visibility = '';
+              scrollRestoreState.restoring = false;
             });
           }
         });
@@ -140,6 +144,7 @@ export default component$(() => {
       document.removeEventListener('click', onClickCapture, true);
       window.removeEventListener('popstate', onPopState);
       if (scrollTimer) clearTimeout(scrollTimer);
+      scrollRestoreState.restoring = false;
     });
   });
 
@@ -161,6 +166,7 @@ export default component$(() => {
     if (scrollTarget == null || scrollTarget <= 0) return;
     const main = document.getElementById('main-content');
     if (main) main.style.visibility = 'hidden';
+    scrollRestoreState.restoring = true;
     const tryRestore = (attempts: number) => {
       requestAnimationFrame(() => {
         window.scrollTo({ top: scrollTarget, behavior: 'instant' as ScrollBehavior });
@@ -169,12 +175,16 @@ export default component$(() => {
         } else {
           requestAnimationFrame(() => {
             if (main) main.style.visibility = '';
+            scrollRestoreState.restoring = false;
           });
         }
       });
     };
     const t = setTimeout(() => tryRestore(4), 50);
-    cleanup(() => clearTimeout(t));
+    cleanup(() => {
+      clearTimeout(t);
+      scrollRestoreState.restoring = false;
+    });
   });
 
   // ── Nav search typeahead (when floating search is open) ─────────────────
