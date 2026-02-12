@@ -198,8 +198,9 @@ export const PostCard = component$<PostCardProps>(({
     return `${days}d`;
   })();
 
-  // Use base-prefixed path so nav() and links work when deployed at a subpath (e.g. GitHub Pages)
-  const postPath = withBase(`/post/${encodeURIComponent(post.uri)}/`);
+  // Path-only for nav() so router resolves with base (fixes post click on GitHub Pages); withBase for <Link href>.
+  const postPathForNav = `/post/${encodeURIComponent(post.uri)}/`;
+  const postPathForLink = withBase(postPathForNav);
   const profilePath = withBase(`/profile/${encodeURIComponent(post.author.handle)}/`);
 
   const showNsfwOverlay = nsfwBlurred;
@@ -214,7 +215,7 @@ export const PostCard = component$<PostCardProps>(({
         ev.preventDefault();
         ev.stopPropagation();
         if (!ev.isTrusted) return;
-        nav(postPath);
+        nav(postPathForNav);
       }}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}
@@ -362,7 +363,7 @@ export const PostCard = component$<PostCardProps>(({
           onDownvote$={onDownvote$}
           onUndoDownvote$={onUndoDownvote$}
           replyCount={post.replyCount ?? 0}
-          replyHref={postPath}
+          replyHref={postPathForLink}
           hideVoteCounts
           likeIcon="heart"
         />

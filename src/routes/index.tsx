@@ -509,10 +509,10 @@ export default component$(() => {
       if (i < 0 || i >= items.length) return;
       const item = items[i];
 
-      // E = Enter/open post
+      // E = Enter/open post (path-only so router resolves with base on GitHub Pages)
       if (key === 'e') {
         e.preventDefault();
-        nav(withBase(`/post/${encodeURIComponent(item.post.uri)}/`));
+        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
         return;
       }
 
@@ -533,10 +533,10 @@ export default component$(() => {
         return;
       }
 
-      // R = Reply (navigate to post with reply intent)
+      // R = Reply (path-only so router resolves with base on GitHub Pages)
       if (key === 'r') {
         e.preventDefault();
-        nav(withBase(`/post/${encodeURIComponent(item.post.uri)}/`));
+        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
         return;
       }
     };
