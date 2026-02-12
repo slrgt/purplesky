@@ -57,6 +57,8 @@ export interface AppStore {
   showComposeModal: boolean;
   /** Global toast message (shown in layout; auto-cleared after delay) */
   toastMessage: string | null;
+  /** True when a new service worker is waiting (prompt user to refresh on GitHub Pages) */
+  updateAvailable: boolean;
 }
 
 // ── Context ID ────────────────────────────────────────────────────────────
@@ -91,6 +93,7 @@ export function useAppProvider() {
     showLoginModal: false,
     showComposeModal: false,
     toastMessage: null,
+    updateAvailable: false,
   });
 
   useContextProvider(AppContext, store);

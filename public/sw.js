@@ -36,11 +36,12 @@ const MAX_CACHED_IMAGES = 200;
 
 // Derive the base path from the SW scope (works on any domain / subpath)
 const BASE = new URL(self.registration?.scope ?? './', self.location.href).pathname;
+// Full URL of the app shell (for fallback when navigation gets 404 or offline)
+const APP_SHELL_URL = new URL('index.html', self.registration?.scope || self.location.href).href;
 
-// Static assets to precache on install (absolute paths using BASE)
+// Precache manifest + icon. App shell (index.html) is fetched separately with
+// cache: 'reload' so we never store stale HTML from a previous SW.
 const PRECACHE_URLS = [
-  BASE,
-  `${BASE}index.html`,
   `${BASE}manifest.json`,
   `${BASE}icon.svg`,
 ];
@@ -48,7 +49,14 @@ const PRECACHE_URLS = [
 // ── Install ───────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => cache.addAll(PRECACHE_URLS))
+    caches.open(STATIC_CACHE).then((cache) =>
+      cache.addAll(PRECACHE_URLS).then(() =>
+        // Fetch app shell with cache bypass so we never precache stale HTML
+        fetch(APP_SHELL_URL, { cache: 'reload' })
+          .then((r) => r.ok && cache.put(APP_SHELL_URL, r))
+          .catch(() => {})
+      )
+    )
   );
   // Activate immediately (don't wait for old SW to stop)
   self.skipWaiting();
@@ -68,6 +76,11 @@ self.addEventListener('activate', (event) => {
   );
   // Take control of all pages immediately
   self.clients.claim();
+});
+
+// When the client asks to activate a waiting worker (e.g. "Refresh" on update prompt)
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // Minimal q-data.json for dynamic routes (post, profile, forum thread, etc.)
@@ -145,9 +158,9 @@ async function cacheFirst(request, cacheName) {
     }
     return response;
   } catch {
-    // Return offline fallback for navigation requests
+    // Return offline fallback for navigation requests (full URL for reliable match)
     if (request.mode === 'navigate') {
-      return caches.match(`${BASE}index.html`);
+      return caches.match(APP_SHELL_URL);
     }
     return new Response('Offline', { status: 503 });
   }
@@ -167,14 +180,11 @@ async function networkFirstNav(request) {
       return response;
     }
     // Server returned error (e.g. 404) – serve app shell for client-side routing
-    return (await caches.match(`${BASE}index.html`)) ||
-           (await caches.match(BASE)) ||
-           response;
+    return (await caches.match(APP_SHELL_URL)) || response;
   } catch {
-    // Network error (offline) – try cache, then app shell
+    // Network error (offline) – try cache, then app shell (full URL for reliable match)
     return (await caches.match(request)) ||
-           (await caches.match(`${BASE}index.html`)) ||
-           (await caches.match(BASE)) ||
+           (await caches.match(APP_SHELL_URL)) ||
            new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
              status: 503,
              headers: { 'Content-Type': 'text/html' },

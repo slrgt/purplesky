@@ -63,6 +63,30 @@ export default component$(() => {
     cleanup(() => clearTimeout(id));
   });
 
+  // ── Service worker update (GitHub Pages: prompt refresh when new version is waiting) ───
+  useVisibleTask$(({ cleanup }) => {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+    const scope = base ? `${base}/` : '/';
+    const ref = { reg: null as ServiceWorkerRegistration | null, aborted: false };
+    const onControllerChange = () => window.location.reload();
+    cleanup(() => {
+      ref.aborted = true;
+      ref.reg?.removeEventListener('controllerchange', onControllerChange);
+    });
+    navigator.serviceWorker.getRegistration(scope).then((registration) => {
+      if (ref.aborted || !registration) return;
+      ref.reg = registration;
+      registration.update();
+      if (registration.waiting) store.updateAvailable = true;
+      registration.addEventListener('updatefound', () => {
+        const w = registration.installing;
+        if (w) w.addEventListener('statechange', () => { if (w.state === 'installed' && registration.waiting) store.updateAvailable = true; });
+      });
+      registration.addEventListener('controllerchange', onControllerChange);
+    });
+  });
+
   // ── Scroll Position Preservation ────────────────────────────────────────
   // Saves scroll position continuously. On back/forward (browser button,
   // mobile edge-swipe, Q key), restores exactly where you were.
@@ -973,6 +997,26 @@ export default component$(() => {
       {store.toastMessage && (
         <div class="app-toast float-btn" role="status" aria-live="polite">
           {store.toastMessage}
+        </div>
+      )}
+
+      {/* New version available (GitHub Pages / PWA): refresh to load latest */}
+      {store.updateAvailable && (
+        <div class="app-toast float-btn" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+          <span>New version available</span>
+          <button
+            type="button"
+            class="glass"
+            style={{ padding: '4px 12px', borderRadius: '20px', fontWeight: 600, fontSize: 'var(--font-xs)' }}
+            onClick$={async () => {
+              const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+              const scope = base ? `${base}/` : '/';
+              const reg = await navigator.serviceWorker.getRegistration(scope);
+              if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }}
+          >
+            Refresh
+          </button>
         </div>
       )}
 
