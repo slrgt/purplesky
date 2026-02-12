@@ -131,38 +131,76 @@ self.addEventListener('fetch', (event) => {
   // Images/videos: Cache-first
   if (url.pathname.match(/\.(jpg|jpeg|png|gif|webp|svg|mp4|webm)$/i) ||
       url.hostname.includes('cdn.bsky.app')) {
-    event.respondWith(cacheFirst(event.request, IMAGE_CACHE));
+    event.respondWith(cacheFirst(event.request, IMAGE_CACHE).catch(() => fetch(event.request)));
     return;
   }
 
   // WASM: Cache-first
   if (url.pathname.endsWith('.wasm')) {
-    event.respondWith(cacheFirst(event.request, STATIC_CACHE));
+    event.respondWith(cacheFirst(event.request, STATIC_CACHE).catch(() => fetch(event.request)));
     return;
   }
 
-  // Static assets: Cache-first
-  event.respondWith(cacheFirst(event.request, STATIC_CACHE));
+  // JS/CSS chunks under /build/: network-first so we never serve stale or empty cached
+  // responses (Qwik dynamic imports fail with "<empty string>" if the chunk body is empty).
+  if (url.pathname.includes('/build/')) {
+    event.respondWith(
+      networkFirstChunk(event.request).catch(() => fetch(event.request))
+    );
+    return;
+  }
+
+  // Static assets: Cache-first (fallback to network on any SW error so chunks always load)
+  event.respondWith(
+    cacheFirst(event.request, STATIC_CACHE).catch(() => fetch(event.request))
+  );
 });
 
 // ── Cache-First Strategy ──────────────────────────────────────────────────
 async function cacheFirst(request, cacheName) {
-  const cached = await caches.match(request);
-  if (cached) return cached;
+  try {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+  } catch {
+    /* ignore cache read errors */
+  }
 
   try {
     const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
+    if (response.ok && response.type === 'basic') {
+      try {
+        const cache = await caches.open(cacheName);
+        cache.put(request, response.clone());
+      } catch {
+        /* ignore cache write errors (e.g. quota); still return the response */
+      }
     }
     return response;
   } catch {
     // Return offline fallback for navigation requests (full URL for reliable match)
     if (request.mode === 'navigate') {
-      return caches.match(APP_SHELL_URL);
+      const fallback = await caches.match(APP_SHELL_URL);
+      if (fallback) return fallback;
     }
-    return new Response('Offline', { status: 503 });
+    throw new Error('cacheFirst failed');
+  }
+}
+
+// ── Network-First for /build/ chunks ───────────────────────────────────────
+// Ensures we never serve a cached empty or 404 response to dynamic imports.
+async function networkFirstChunk(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok && response.type === 'basic') {
+      try {
+        const cache = await caches.open(STATIC_CACHE);
+        cache.put(request, response.clone());
+      } catch { /* ignore */ }
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    return cached || Promise.reject(new Error('networkFirstChunk failed'));
   }
 }
 
