@@ -552,7 +552,9 @@ export default component$(() => {
   const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
   const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
   const isHome = pathAfterBase === '/' || pathAfterBase === '';
-  const showBackButton = !isHome;
+  const searchParams = new URLSearchParams(loc.url.search);
+  const isOAuthCallback = searchParams.has('state') && (searchParams.has('code') || searchParams.has('error'));
+  const showBackButton = !isHome && !isOAuthCallback;
   /** Full href for nav items (include base so bottom nav works when deployed at subpath) */
   const navHref = (path: string) => (path === '/' ? `${base}/` : `${base}${path}`);
 
