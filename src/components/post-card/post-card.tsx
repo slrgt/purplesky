@@ -209,10 +209,10 @@ export const PostCard = component$<PostCardProps>(({
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
-      onClick$={() => nav(postPath)}
-      role="button"
-      tabIndex={0}
-      onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(postPath); } }}
+      onClick$={(e) => {
+        // Only navigate on real user clicks; ignore synthetic/ghost clicks (e.g. on load or layout shift)
+        if ((e as MouseEvent).isTrusted) nav(postPath);
+      }}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}
       {hasMedia && (
