@@ -178,10 +178,18 @@ export default component$(() => {
 
   // ── Restore scroll when navigating to Home (or any page) via link ─────
   // Popstate handles back/forward; this handles clicking Home / nav links.
+  // Only restore on "list" routes (feed, forum index, search, etc.). Do NOT
+  // restore when navigating to a detail page (post, profile, forum thread),
+  // otherwise we hide main-content and jump to an old scroll position, causing
+  // a visible flash when clicking a post.
   useVisibleTask$(({ track, cleanup }) => {
     track(() => loc.url.pathname);
     track(() => loc.url.search);
     const pathname = loc.url.pathname;
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+    const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+    const isDetailRoute = pathAfterBase.startsWith('/post/') || pathAfterBase.startsWith('/profile/') || (pathAfterBase.startsWith('/forum/') && pathAfterBase !== '/forum/' && pathAfterBase !== '/forum');
+    if (isDetailRoute) return;
     const key = loc.url.pathname + loc.url.search;
     const SCROLL_KEY = 'purplesky-scroll-positions';
     function getScrollMap(): Record<string, number> {
