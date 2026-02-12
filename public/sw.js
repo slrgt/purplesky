@@ -23,8 +23,8 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-const CACHE_NAME = 'purplesky-v1';
-const STATIC_CACHE = 'purplesky-static-v1';
+const CACHE_NAME = 'purplesky-v2';
+const STATIC_CACHE = 'purplesky-static-v2';
 const IMAGE_CACHE = 'purplesky-images-v1';
 const API_CACHE = 'purplesky-api-v1';
 
@@ -69,12 +69,34 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Minimal q-data.json for dynamic routes (post, profile, forum thread, etc.)
+// When SSG doesn't pre-render a path, the server returns 404 for q-data.json.
+// Returning this prevents Qwik City from doing a full page redirect, so SPA nav
+// stays in place and the route component loads and fetches data on the client.
+const EMPTY_QDATA = JSON.stringify({ loaders: {} });
+
 // ── Fetch ─────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Skip non-GET requests (POST, PUT, DELETE go to network)
   if (event.request.method !== 'GET') return;
+
+  // q-data.json: on 404 return empty loaders so dynamic routes work without full reload
+  if (url.pathname.endsWith('/q-data.json')) {
+    event.respondWith(
+      fetch(event.request).then((r) => {
+        if (r.status === 404 || !(r.headers.get('content-type') || '').includes('json')) {
+          return new Response(EMPTY_QDATA, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return r;
+      })
+    );
+    return;
+  }
 
   // API calls: Network-first with cache fallback
   if (url.hostname.includes('bsky.social') ||

@@ -299,6 +299,20 @@ export default component$(() => {
     }
   });
 
+  // When the app is served 404.html at a non-root URL (e.g. direct link to a post),
+  // sync the route so the correct page loads instead of staying on index.
+  useVisibleTask$(async () => {
+    if (typeof window === 'undefined') return;
+    const navEntry = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
+    if (!navEntry || navEntry.type !== 'navigate') return;
+    const pathname = window.location.pathname;
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+    const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+    if (pathAfterBase === '/' || pathAfterBase === '') return;
+    const target = pathname + window.location.search + window.location.hash;
+    await nav(target);
+  });
+
   // Close account dropdown on outside click
   useVisibleTask$(({ track, cleanup }) => {
     track(() => accountMenuOpen.value);
