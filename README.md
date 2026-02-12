@@ -181,6 +181,21 @@ npm run build
 # Upload dist/ to your hosting (or dist/<base-path-segment>/ if using a subpath)
 ```
 
+### Stale cache / old code after updates
+
+The app uses a **service worker** (cache-first for JS/CSS) and **localStorage** for preferences and session. If you see broken behavior after a deploy (e.g. old bugs, wrong navigation, login issues), try:
+
+1. **Hard refresh**  
+   - Desktop: `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (Mac)  
+   - Or DevTools → Application → Service Workers → **Update** (or **Unregister**), then reload.
+
+2. **Clear site data for this origin**  
+   - DevTools → Application → Storage → **Clear site data**  
+   - This removes the service worker cache, localStorage, and sessionStorage. You’ll need to log in again.
+
+3. **Bump cache version on deploy**  
+   - In `public/sw.js`, the cache names include a version (e.g. `purplesky-static-v4`). Bumping that version when you deploy forces clients to drop old caches and fetch fresh assets.
+
 ## How to Edit
 
 Every file has comments at the top explaining what it does and how to modify it. Here's a quick guide:

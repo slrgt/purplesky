@@ -23,8 +23,9 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-const CACHE_NAME = 'purplesky-v3';
-const STATIC_CACHE = 'purplesky-static-v3';
+// Bump version when deploying so old cached JS/CSS are dropped (avoids running stale code).
+const CACHE_NAME = 'purplesky-v4';
+const STATIC_CACHE = 'purplesky-static-v4';
 const IMAGE_CACHE = 'purplesky-images-v1';
 const API_CACHE = 'purplesky-api-v1';
 
