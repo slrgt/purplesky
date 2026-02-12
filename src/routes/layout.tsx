@@ -25,6 +25,9 @@ import type { ThemeMode, CardViewMode } from '~/lib/types';
 import { ComposeModal } from '~/components/compose-modal/compose-modal';
 import './layout.css';
 
+/** Route sync runs only once per page load to avoid loops on static hosts (e.g. GitHub Pages). */
+let routeSyncDone = false;
+
 export default component$(() => {
   const store = useAppProvider();
   const loc = useLocation();
@@ -303,31 +306,27 @@ export default component$(() => {
 
     // ── 3. Route sync for 404.html (runs AFTER session is restored) ─────
     // When the app is served via 404.html at a non-root URL (e.g. direct
-    // link to /purplesky-1/post/...), QwikCity thinks we're at "/".
-    // We call nav() to sync the router to the actual URL.
+    // link to /purplesky/post/...), QwikCity may think we're at "/".
+    // We call nav() once to sync the router to the actual URL.
     //
-    // This MUST run after session restore so the navigated-to route sees
-    // the correct login state on first render (no flicker).
-    //
-    // Skip when OAuth callback params are present — the callback is always
-    // at the root path and the params have already been consumed above.
+    // Run only ONCE per page load so we never loop (e.g. on GitHub Pages
+    // where nav() could otherwise be re-triggered).
     try {
+      if (routeSyncDone) return;
       const navEntry = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
-      if (navEntry && navEntry.type === 'navigate') {
-        const params = new URLSearchParams(window.location.search);
-        const isOAuthCallback = params.has('state') && (params.has('code') || params.has('error'));
-        if (!isOAuthCallback) {
-          const pathname = window.location.pathname;
-          const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-          const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
-          if (pathAfterBase !== '/' && pathAfterBase !== '') {
-            // Strip OAuth params from the target — only carry non-OAuth search params
-            const cleanSearch = window.location.search;
-            const target = pathname + cleanSearch + window.location.hash;
-            await nav(target);
-          }
-        }
-      }
+      if (!navEntry || navEntry.type !== 'navigate') return;
+      const params = new URLSearchParams(window.location.search);
+      const isOAuthCallback = params.has('state') && (params.has('code') || params.has('error'));
+      if (isOAuthCallback) return;
+      const pathname = window.location.pathname;
+      const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+      const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+      const isHome = pathAfterBase === '/' || pathAfterBase === '' || pathname === base || pathname === base + '/';
+      if (isHome) return;
+      routeSyncDone = true;
+      const cleanSearch = window.location.search;
+      const target = pathname + cleanSearch + window.location.hash;
+      await nav(target);
     } catch { /* ignore route sync errors */ }
   });
 
