@@ -509,10 +509,10 @@ export default component$(() => {
       if (i < 0 || i >= items.length) return;
       const item = items[i];
 
-      // E = Enter/open post (path-only so router resolves with base on GitHub Pages)
+      // E = Enter/open post (full path with base so GitHub Pages stays under /repo/)
       if (key === 'e') {
         e.preventDefault();
-        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        nav(withBase(`/post/${encodeURIComponent(item.post.uri)}/`));
         return;
       }
 
@@ -533,10 +533,10 @@ export default component$(() => {
         return;
       }
 
-      // R = Reply (path-only so router resolves with base on GitHub Pages)
+      // R = Reply (full path with base so GitHub Pages stays under /repo/)
       if (key === 'r') {
         e.preventDefault();
-        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        nav(withBase(`/post/${encodeURIComponent(item.post.uri)}/`));
         return;
       }
     };

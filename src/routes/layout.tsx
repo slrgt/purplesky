@@ -335,8 +335,11 @@ export default component$(() => {
       if (isHome) return;
       routeSyncState.done = true;
       const cleanSearch = window.location.search;
-      // Pass path relative to base so Qwik router doesn't double-apply base (avoids /purplesky/purplesky/...)
-      const target = (pathAfterBase || '/') + cleanSearch + window.location.hash;
+      // Pass full path WITH base: Qwik's nav() resolves via new URL(path, currentUrl), so a path-only
+      // value like "/post/xyz/" becomes origin + path = /post/xyz/ (wrong on GitHub Pages). We must
+      // pass base + path so the resolved URL stays under the app (e.g. /purplesky/post/xyz/).
+      const pathWithBase = base ? (pathAfterBase === '/' || pathAfterBase === '' ? `${base}/` : `${base}${pathAfterBase}`) : (pathAfterBase || '/');
+      const target = pathWithBase + cleanSearch + window.location.hash;
       await nav(target);
     } catch { /* ignore route sync errors */ }
   });

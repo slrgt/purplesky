@@ -198,9 +198,10 @@ export const PostCard = component$<PostCardProps>(({
     return `${days}d`;
   })();
 
-  // Path-only for nav() so router resolves with base (fixes post click on GitHub Pages); withBase for <Link href>.
-  const postPathForNav = `/post/${encodeURIComponent(post.uri)}/`;
-  const postPathForLink = withBase(postPathForNav);
+  // Use full path with base for both nav() and <Link>: Qwik resolves nav(path) via new URL(path, currentUrl),
+  // so path-only "/post/xyz/" becomes origin + path (drops /purplesky/ on GitHub Pages). withBase fixes that.
+  const postPathForNav = withBase(`/post/${encodeURIComponent(post.uri)}/`);
+  const postPathForLink = postPathForNav;
   const profilePath = withBase(`/profile/${encodeURIComponent(post.author.handle)}/`);
 
   const showNsfwOverlay = nsfwBlurred;
@@ -226,7 +227,7 @@ export const PostCard = component$<PostCardProps>(({
           return;
         }
         cardReceivedPointerDown.value = false;
-        nav(postPathForNav);
+        nav(postPathForNav); // full path with base so GitHub Pages stays under /repo/
       }}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}

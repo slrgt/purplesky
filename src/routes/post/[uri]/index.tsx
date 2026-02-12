@@ -246,7 +246,7 @@ export default component$(() => {
           <FollowAvatar
             authorDid={p.author.did}
             followUri={(p.author as { viewer?: { following?: string } }).viewer?.following}
-            profilePath={`/profile/${encodeURIComponent(p.author.handle)}/`}
+            profilePath={withBase(`/profile/${encodeURIComponent(p.author.handle)}/`)}
             avatarUrl={p.author.avatar ? resizedAvatarUrl(p.author.avatar, 40) : undefined}
             size={40}
           />
@@ -520,7 +520,7 @@ export default component$(() => {
                         <FollowAvatar
                           authorDid={rp.author.did}
                           followUri={(rp.author as { viewer?: { following?: string } }).viewer?.following}
-                          profilePath={`/profile/${encodeURIComponent(rp.author.handle)}/`}
+                          profilePath={withBase(`/profile/${encodeURIComponent(rp.author.handle)}/`)}
                           avatarUrl={rp.author.avatar ? resizedAvatarUrl(rp.author.avatar, 24) : undefined}
                           size={24}
                         />
