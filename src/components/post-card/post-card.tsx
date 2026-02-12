@@ -304,7 +304,10 @@ export const PostCard = component$<PostCardProps>(({
 
       {/* ── Text (full: full snippet; art: one line; mini: skip) ────────── */}
       {record?.text && cardViewMode !== 'mini' && (
-        <p class={`post-text ${cardViewMode === 'art' ? 'post-text-art' : ''}`}>
+        <p
+          class={`post-text ${cardViewMode === 'art' ? 'post-text-art' : ''}`}
+          onClick$={(e) => e.stopPropagation()}
+        >
           <RichText
             text={cardViewMode === 'art'
               ? (record.text.length > 80 ? record.text.slice(0, 80) + '…' : record.text)
