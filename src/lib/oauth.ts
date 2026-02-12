@@ -85,8 +85,29 @@ export type OAuthSession = import('@atproto/oauth-client').OAuthSession;
 /**
  * Initialize OAuth: restore existing session or process callback after redirect.
  * Call this on app startup.
+ *
+ * Includes a concurrency guard so that multiple calls (e.g. from racing
+ * useVisibleTask$ hooks) share a single in-flight request instead of
+ * creating parallel BrowserOAuthClient.init() calls that fight each other.
  */
+let _initPromise: Promise<{ session: OAuthSession; state?: string | null } | undefined> | null = null;
+
 export async function initOAuth(options?: {
+  hasCallback?: boolean;
+  preferredRestoreDid?: string;
+}): Promise<{ session: OAuthSession; state?: string | null } | undefined> {
+  // If an init is already in flight, reuse it (prevents duplicate processing)
+  if (_initPromise) return _initPromise;
+
+  _initPromise = _doInitOAuth(options);
+  try {
+    return await _initPromise;
+  } finally {
+    _initPromise = null;
+  }
+}
+
+async function _doInitOAuth(options?: {
   hasCallback?: boolean;
   preferredRestoreDid?: string;
 }): Promise<{ session: OAuthSession; state?: string | null } | undefined> {

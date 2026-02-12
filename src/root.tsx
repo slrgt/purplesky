@@ -15,17 +15,21 @@ import { QwikCityProvider, RouterOutlet } from '@builder.io/qwik-city';
 
 import './global.css';
 
-/** Register the service worker only on mobile or when installed as PWA to avoid "persistent storage" prompts on desktop. */
-const ServiceWorkerRegisterConditional = component$(() => {
+/**
+ * Register the service worker on ALL platforms.
+ *
+ * The SW is essential for the app to work on static hosts (GitHub Pages):
+ * it intercepts q-data.json requests for dynamic routes (post, profile, etc.)
+ * and returns synthetic empty-loader responses so QwikCity stays in SPA mode.
+ * Without it, every client-side navigation triggers a full page reload (MPA
+ * fallback) because GitHub Pages returns 404 HTML for missing q-data.json files.
+ *
+ * Note: Service workers do NOT cause "persistent storage" prompts — those come
+ * from navigator.storage.persist() which we don't call.
+ */
+const ServiceWorkerRegister = component$(() => {
   useVisibleTask$(() => {
     if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    const isMobile =
-      /Mobi|Android|iPhone|iPad|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-      (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true;
-    if (!isStandalone && !isMobile) return;
     const base = import.meta.env.BASE_URL || '/';
     navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).catch((e) => console.error('SW register failed:', e));
   });
@@ -57,7 +61,7 @@ export default component$(() => {
           Skip to content
         </a>
         <RouterOutlet />
-        <ServiceWorkerRegisterConditional />
+        <ServiceWorkerRegister />
       </body>
     </QwikCityProvider>
   );

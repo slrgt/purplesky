@@ -207,19 +207,22 @@ export default component$(() => {
   });
 
   // ── Restore session & theme on first load (browser only) ──────────────
+  //
+  // IMPORTANT: Session restore and route sync are combined into a single
+  // useVisibleTask$ so they execute sequentially. Running them in separate
+  // tasks caused a race condition: the route sync would call nav() while
+  // session restore was still in-flight, causing Qwik to re-render the
+  // layout with isLoggedIn=false, then true once restore finished — the
+  // user saw a "logged in → logged out → logged in" flicker.
   useVisibleTask$(async () => {
-    // Restore theme from localStorage
+    // ── 1. Restore theme / preferences from localStorage (sync) ─────────
     const savedTheme = localStorage.getItem('purplesky-theme') as ThemeMode | null;
     if (savedTheme) {
       store.theme = savedTheme;
       document.documentElement.setAttribute('data-theme', savedTheme === 'system' ? '' : savedTheme);
     }
-
-    // Restore view columns
     const savedCols = localStorage.getItem('purplesky-view-columns');
     if (savedCols) store.viewColumns = parseInt(savedCols) as 1 | 2 | 3;
-
-    // Restore card view mode and NSFW preference
     const savedCardView = localStorage.getItem('purplesky-card-view') as CardViewMode | null;
     if (savedCardView === 'full' || savedCardView === 'mini' || savedCardView === 'art') store.cardViewMode = savedCardView;
     const savedNsfw = localStorage.getItem('purplesky-nsfw-mode') as 'hide' | 'blur' | 'show' | null;
@@ -227,7 +230,7 @@ export default component$(() => {
     const savedMediaOnly = localStorage.getItem('purplesky-media-only');
     if (savedMediaOnly === '1') store.mediaOnly = true;
 
-    // Restore session
+    // ── 2. Restore session (async — must finish before route sync) ──────
     try {
       const { resumeSession, getSession } = await import('~/lib/bsky');
 
@@ -244,7 +247,7 @@ export default component$(() => {
           const { setOAuthAgent, addOAuthDid } = await import('~/lib/bsky');
           setOAuthAgent(oauthAgent, result.session);
           addOAuthDid(oauthAgent.did!, true);
-          // Clean URL
+          // Clean URL — remove OAuth callback params so they aren't replayed
           window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         }
       } else {
@@ -297,20 +300,35 @@ export default component$(() => {
     } catch (err) {
       console.error('Session restore failed:', err);
     }
-  });
 
-  // When the app is served 404.html at a non-root URL (e.g. direct link to a post),
-  // sync the route so the correct page loads instead of staying on index.
-  useVisibleTask$(async () => {
-    if (typeof window === 'undefined') return;
-    const navEntry = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
-    if (!navEntry || navEntry.type !== 'navigate') return;
-    const pathname = window.location.pathname;
-    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
-    const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
-    if (pathAfterBase === '/' || pathAfterBase === '') return;
-    const target = pathname + window.location.search + window.location.hash;
-    await nav(target);
+    // ── 3. Route sync for 404.html (runs AFTER session is restored) ─────
+    // When the app is served via 404.html at a non-root URL (e.g. direct
+    // link to /purplesky-1/post/...), QwikCity thinks we're at "/".
+    // We call nav() to sync the router to the actual URL.
+    //
+    // This MUST run after session restore so the navigated-to route sees
+    // the correct login state on first render (no flicker).
+    //
+    // Skip when OAuth callback params are present — the callback is always
+    // at the root path and the params have already been consumed above.
+    try {
+      const navEntry = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
+      if (navEntry && navEntry.type === 'navigate') {
+        const params = new URLSearchParams(window.location.search);
+        const isOAuthCallback = params.has('state') && (params.has('code') || params.has('error'));
+        if (!isOAuthCallback) {
+          const pathname = window.location.pathname;
+          const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+          const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+          if (pathAfterBase !== '/' && pathAfterBase !== '') {
+            // Strip OAuth params from the target — only carry non-OAuth search params
+            const cleanSearch = window.location.search;
+            const target = pathname + cleanSearch + window.location.hash;
+            await nav(target);
+          }
+        }
+      }
+    } catch { /* ignore route sync errors */ }
   });
 
   // Close account dropdown on outside click

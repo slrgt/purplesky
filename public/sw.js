@@ -82,18 +82,32 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests (POST, PUT, DELETE go to network)
   if (event.request.method !== 'GET') return;
 
-  // q-data.json: on 404 return empty loaders so dynamic routes work without full reload
+  // q-data.json: on 404 return empty loaders so dynamic routes work without full reload.
+  // Without this, QwikCity falls back to MPA (full page reload) for every client-side
+  // navigation to a dynamic route (post, profile, etc.) because GitHub Pages has no
+  // server to render q-data.json. The .catch() is critical — without it a network
+  // hiccup causes the promise to reject and QwikCity gets no response at all.
   if (url.pathname.endsWith('/q-data.json')) {
     event.respondWith(
-      fetch(event.request).then((r) => {
-        if (r.status === 404 || !(r.headers.get('content-type') || '').includes('json')) {
+      fetch(event.request)
+        .then((r) => {
+          if (r.ok && (r.headers.get('content-type') || '').includes('json')) {
+            return r;
+          }
+          // GitHub Pages returns 404 (with 404.html content) for missing q-data.json files.
+          // Return synthetic empty loaders so QwikCity stays in SPA mode.
           return new Response(EMPTY_QDATA, {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           });
-        }
-        return r;
-      })
+        })
+        .catch(() => {
+          // Network error — still return empty loaders to prevent MPA fallback
+          return new Response(EMPTY_QDATA, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        })
     );
     return;
   }
