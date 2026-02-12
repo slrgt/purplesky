@@ -204,17 +204,28 @@ export const PostCard = component$<PostCardProps>(({
   const profilePath = withBase(`/profile/${encodeURIComponent(post.author.handle)}/`);
 
   const showNsfwOverlay = nsfwBlurred;
+  /** Only navigate when click was preceded by pointerdown on this card (avoids hover-synthesized taps). */
+  const cardReceivedPointerDown = useSignal(false);
 
   return (
     <article
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
+      onPointerDownCapture$={() => { cardReceivedPointerDown.value = true; }}
+      onPointerLeave$={() => { cardReceivedPointerDown.value = false; }}
       onClick$={(e) => {
         const ev = e as MouseEvent;
         ev.preventDefault();
         ev.stopPropagation();
         if (!ev.isTrusted) return;
+        if (!cardReceivedPointerDown.value) return;
+        const target = ev.target as HTMLElement | null;
+        if (target?.closest?.('button, a[href], [data-action]')) {
+          cardReceivedPointerDown.value = false;
+          return;
+        }
+        cardReceivedPointerDown.value = false;
         nav(postPathForNav);
       }}
     >
