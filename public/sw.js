@@ -24,8 +24,8 @@
  */
 
 // Bump version when deploying so old cached JS/CSS are dropped (avoids running stale code).
-const CACHE_NAME = 'purplesky-v5';
-const STATIC_CACHE = 'purplesky-static-v5';
+const CACHE_NAME = 'purplesky-v6';
+const STATIC_CACHE = 'purplesky-static-v6';
 const IMAGE_CACHE = 'purplesky-images-v1';
 const API_CACHE = 'purplesky-api-v1';
 
@@ -189,10 +189,9 @@ async function cacheFirst(request, cacheName) {
 // tries the exact URL cache, then the app shell.
 async function networkFirstNav(request) {
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: 'reload' });
     if (response.ok) {
-      const cache = await caches.open(STATIC_CACHE);
-      cache.put(request, response.clone());
+      // Do not cache: stale HTML would reference old chunk filenames and break after deploy
       return response;
     }
     // Server returned error (e.g. 404) – serve app shell for client-side routing
