@@ -115,24 +115,6 @@
   padding: var(--space-lg);
 }
 
-/* ── Guest Section ─────────────────────────────────────────────────────── */
-.guest-section {
-  margin-top: var(--space-xl);
-  padding: var(--space-xl);
-  text-align: center;
-}
-.guest-section h3 {
-  font-size: var(--font-xl);
-  margin-bottom: var(--space-sm);
-}
-.guest-section p {
-  color: var(--muted);
-  margin-bottom: var(--space-lg);
-  max-width: 400px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
 /* ── Floating Feeds button (artsky-style, top center) ────────────────────── */
 .feeds-float-wrap {
   position: fixed;

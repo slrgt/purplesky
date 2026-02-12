@@ -56,7 +56,7 @@ export default component$(() => {
   const mouseOverIndex = useSignal(-1);
 
   // ── Feed State ──────────────────────────────────────────────────────────
-  /** Cursors: for mixed feed use keys like 'timeline', at://...; for guest use 'guest'. */
+  /** Cursors: for mixed feed use keys like 'timeline', at://... */
   const feed = useStore<{
     items: TimelineItem[];
     loading: boolean;
@@ -105,42 +105,21 @@ export default component$(() => {
   /** Post URIs user has tapped to unblur (NSFW blur mode) */
   const unblurredNsfwUris = useSignal<Set<string>>(new Set());
 
-  // ── Guest feed handles (shown when not logged in) ───────────────────────
-  const GUEST_HANDLES = [
-    'studio.blender.org', 'godotengine.org', 'stsci.edu',
-    'oseanworld.bsky.social', 'osean.world',
-  ];
-
   // ── Load Feed ───────────────────────────────────────────────────────────
   const loadFeed = $(async (append = false) => {
     feed.loading = true;
     feed.error = null;
     try {
-      if (app.session.isLoggedIn) {
-        const { getMixedFeed } = await import('~/lib/bsky');
-        const cursorsToUse = append && Object.keys(feed.cursors).length > 0 ? feed.cursors : undefined;
-        const result = await getMixedFeed(app.feedMix, 30, cursorsToUse);
-        if (append) {
-          feed.items = [...feed.items, ...result.feed];
-        } else {
-          feed.items = result.feed;
-        }
-        feed.cursors = result.cursors ?? {};
+      const { getMixedFeed } = await import('~/lib/bsky');
+      const cursorsToUse = append && Object.keys(feed.cursors).length > 0 ? feed.cursors : undefined;
+      const usePublic = !app.session.isLoggedIn;
+      const result = await getMixedFeed(app.feedMix, 30, cursorsToUse, usePublic);
+      if (append) {
+        feed.items = [...feed.items, ...result.feed];
       } else {
-        const { getGuestFeed } = await import('~/lib/bsky');
-        const guestCursor = feed.cursors['guest'];
-        const result = await getGuestFeed(
-          GUEST_HANDLES,
-          30,
-          append && guestCursor ? guestCursor : undefined,
-        );
-        if (append) {
-          feed.items = [...feed.items, ...result.feed];
-        } else {
-          feed.items = result.feed;
-        }
-        feed.cursors = result.cursor ? { guest: result.cursor } : {};
+        feed.items = result.feed;
       }
+      feed.cursors = result.cursors ?? {};
     } catch (err) {
       feed.error = err instanceof Error ? err.message : 'Failed to load feed';
     }
@@ -263,7 +242,6 @@ export default component$(() => {
       feedMixInitialized.value = true;
       return;
     }
-    if (!app.session.isLoggedIn) return;
     if (feedMixReloadTimeout.value !== undefined) clearTimeout(feedMixReloadTimeout.value);
     feedMixReloadTimeout.value = setTimeout(() => {
       feedMixReloadTimeout.value = undefined;
@@ -804,17 +782,6 @@ export default component$(() => {
       {/* ── Suggested Follows (when logged in) ───────────────────────────── */}
       {app.session.isLoggedIn && !feed.loading && displayItems.length > 0 && (
         <SuggestedFollowsSection />
-      )}
-
-      {/* ── Guest CTA (when not logged in) ─────────────────────────────── */}
-      {!app.session.isLoggedIn && !feed.loading && (
-        <div class="guest-section glass">
-          <h3>Welcome to PurpleSky</h3>
-          <p>Log in with your Bluesky account to see your personalized feed, save posts to collections, and more.</p>
-          <button class="btn" onClick$={() => { app.showLoginModal = true; }}>
-            Log In with Bluesky
-          </button>
-        </div>
       )}
     </div>
   );

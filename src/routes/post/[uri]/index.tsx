@@ -179,7 +179,7 @@ export default component$(() => {
       <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--muted)', maxWidth: '400px', margin: '0 auto' }}>
         <p style={{ marginBottom: 'var(--space-md)' }}>Post not found.</p>
         <p style={{ fontSize: 'var(--font-sm)', marginBottom: 'var(--space-lg)' }}>
-          It may have been deleted, or the account may no longer exist. Guest feed posts are from real accounts; if you followed a link, it may be outdated.
+          It may have been deleted, or the account may no longer exist. If you followed a link, it may be outdated.
         </p>
         <Link href={withBase('/')} class="btn" style={{ display: 'inline-block' }}>Back to feed</Link>
       </div>

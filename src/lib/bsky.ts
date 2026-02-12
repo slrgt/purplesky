@@ -322,15 +322,17 @@ export async function getFeed(
   return { feed: res.data.feed as TimelineItem[], cursor: res.data.cursor };
 }
 
-/** Fetch and merge multiple feeds by percentage. */
+/** Fetch and merge multiple feeds by percentage. When usePublic is true (e.g. logged out), uses publicAgent and skips timeline (auth-only) entries. */
 export async function getMixedFeed(
   entries: FeedMixEntry[],
   limit: number,
   cursors?: Record<string, string>,
+  usePublic = false,
 ): Promise<{ feed: TimelineItem[]; cursors: Record<string, string> }> {
   const totalPercent = entries.reduce((s, e) => s + e.percent, 0);
   if (!entries.length || totalPercent <= 0) return { feed: [], cursors: {} };
 
+  const api = usePublic ? publicAgent : agent;
   const fetchLimit = Math.max(limit, 50);
   const results = await Promise.all(
     entries.map(async (entry) => {
@@ -338,11 +340,12 @@ export async function getMixedFeed(
       const cursor = cursors?.[key];
       try {
         if (entry.source.kind === 'timeline') {
+          if (usePublic) return { key, feed: [] as TimelineItem[], nextCursor: undefined };
           const res = await agent.getTimeline({ limit: fetchLimit, cursor });
           return { key, feed: res.data.feed as TimelineItem[], nextCursor: res.data.cursor };
         }
         if (entry.source.uri) {
-          const res = await agent.app.bsky.feed.getFeed({ feed: entry.source.uri, limit: fetchLimit, cursor });
+          const res = await api.app.bsky.feed.getFeed({ feed: entry.source.uri, limit: fetchLimit, cursor });
           return { key, feed: res.data.feed as TimelineItem[], nextCursor: res.data.cursor };
         }
       } catch { /* ignore failed feed */ }
@@ -375,40 +378,6 @@ export async function getMixedFeed(
   const nextCursors: Record<string, string> = {};
   results.forEach((r) => { if (r.nextCursor) nextCursors[r.key] = r.nextCursor; });
   return { feed: combined.slice(0, limit), cursors: nextCursors };
-}
-
-/** Fetch author feeds for guest mode (no login required). */
-export async function getGuestFeed(
-  handles: string[],
-  limit: number,
-  cursor?: string,
-): Promise<{ feed: TimelineItem[]; cursor?: string }> {
-  const offset = cursor ? parseInt(cursor, 10) || 0 : 0;
-  const need = offset + limit;
-  const perHandle = Math.ceil(need / handles.length) + 5;
-  const results = await Promise.all(
-    handles.map((actor) =>
-      publicAgent.getAuthorFeed({ actor, limit: perHandle }).catch((err) => {
-        console.warn(`[PurpleSky] Guest feed fetch failed for ${actor}:`, err);
-        return { data: { feed: [] } };
-      }),
-    ),
-  );
-  const all = results.flatMap((r) => (r.data.feed || []) as TimelineItem[]);
-  const seen = new Set<string>();
-  const deduped = all.filter((item) => {
-    if (seen.has(item.post.uri)) return false;
-    seen.add(item.post.uri);
-    return true;
-  });
-  deduped.sort((a, b) => {
-    const ta = new Date((a.post.record as { createdAt?: string })?.createdAt ?? 0).getTime();
-    const tb = new Date((b.post.record as { createdAt?: string })?.createdAt ?? 0).getTime();
-    return tb - ta;
-  });
-  const feed = deduped.slice(offset, offset + limit);
-  const nextCursor = deduped.length >= offset + limit ? String(offset + limit) : undefined;
-  return { feed, cursor: nextCursor };
 }
 
 // ── Post Media Helpers ────────────────────────────────────────────────────
