@@ -101,6 +101,18 @@ fn wilson_score(ups: u32, downs: u32) -> f64 {
     (center - spread) / denominator
 }
 
+/// Sort by net score: likes minus downvotes (one added per like, one subtracted per downvote).
+#[wasm_bindgen]
+pub fn sort_by_score(posts_json: &str) -> String {
+    let mut posts: Vec<SortablePost> = serde_json::from_str(posts_json).unwrap_or_default();
+    posts.sort_by(|a, b| {
+        let score_a = a.like_count as i32 - a.downvote_count as i32;
+        let score_b = b.like_count as i32 - b.downvote_count as i32;
+        score_b.cmp(&score_a)
+    });
+    serde_json::to_string(&posts).unwrap_or_default()
+}
+
 /// Sort by "controversial" – posts with many votes but close to 50/50 split.
 #[wasm_bindgen]
 pub fn sort_by_controversial(posts_json: &str) -> String {

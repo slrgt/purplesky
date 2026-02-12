@@ -5,7 +5,7 @@
  *
  * This is the root layout for all pages. It provides:
  *  - App context (global state)
- *  - Fixed header with logo, search, account menu
+ *  - Floating top-right account/login button (no top navbar)
  *  - Floating bottom navigation bar (iOS-style tab bar)
  *  - Theme initialization
  *  - Session restoration on app load
@@ -20,8 +20,9 @@
 import { component$, Slot, useVisibleTask$, useSignal, $ } from '@builder.io/qwik';
 import { Link, useLocation, useNavigate } from '@builder.io/qwik-city';
 import { useAppProvider, useAppState } from '~/context/app-context';
-import type { ThemeMode } from '~/lib/types';
+import type { ThemeMode, CardViewMode } from '~/lib/types';
 
+import { ComposeModal } from '~/components/compose-modal/compose-modal';
 import './layout.css';
 
 export default component$(() => {
@@ -29,16 +30,140 @@ export default component$(() => {
   const loc = useLocation();
   const nav = useNavigate();
 
-  const searchQuery = useSignal('');
-  const searchOpen = useSignal(false);
-  const searchLoading = useSignal(false);
-  const searchResults = useSignal<{
-    actors: Array<{ did: string; handle: string; displayName?: string; avatar?: string }>;
-    posts: Array<{ uri: string; author?: { handle: string; displayName?: string }; record?: { text?: string } }>;
-  }>({ actors: [], posts: [] });
+  const showAbout = useSignal(false);
   const accountMenuOpen = useSignal(false);
-  const searchWrapRef = useSignal<HTMLElement>();
   const accountWrapRef = useSignal<HTMLElement>();
+
+  // Auto-dismiss global toast after 2.5s
+  useVisibleTask$(({ track, cleanup }) => {
+    track(() => store.toastMessage);
+    if (!store.toastMessage) return;
+    const id = setTimeout(() => {
+      store.toastMessage = null;
+    }, 2500);
+    cleanup(() => clearTimeout(id));
+  });
+
+  // ── Scroll Position Preservation ────────────────────────────────────────
+  // Saves scroll position continuously. On back/forward (browser button,
+  // mobile edge-swipe, Q key), restores exactly where you were.
+  // Forward navigation (clicking a link) scrolls to top as normal.
+  useVisibleTask$(({ cleanup }) => {
+    // Disable the browser's built-in scroll restoration so we control it
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+
+    const SCROLL_KEY = 'purplesky-scroll-positions';
+
+    function getScrollMap(): Record<string, number> {
+      try {
+        const raw = sessionStorage.getItem(SCROLL_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch { return {}; }
+    }
+
+    function saveCurrentScroll() {
+      const map = getScrollMap();
+      map[location.pathname + location.search] = window.scrollY;
+      try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(map)); } catch { /* ignore */ }
+      // Also embed in history.state for back/forward accuracy
+      try {
+        const state = history.state ?? {};
+        history.replaceState({ ...state, _scrollY: window.scrollY }, '');
+      } catch { /* ignore */ }
+    }
+
+    // Debounced scroll save — keeps position fresh as user scrolls
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(saveCurrentScroll, 100);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    // Before internal link clicks, snapshot the scroll position immediately
+    const onClickCapture = (e: Event) => {
+      const anchor = (e.target as HTMLElement).closest('a');
+      if (anchor && anchor.href && new URL(anchor.href).origin === location.origin) {
+        saveCurrentScroll();
+      }
+    };
+    document.addEventListener('click', onClickCapture, true);
+
+    // On popstate (back button, forward button, mobile swipe-back), restore scroll
+    const onPopState = (e: PopStateEvent) => {
+      const stateScroll = (e.state as { _scrollY?: number } | null)?._scrollY;
+      const key = location.pathname + location.search;
+
+      const scrollTarget = typeof stateScroll === 'number'
+        ? stateScroll
+        : (getScrollMap()[key] ?? null);
+      if (scrollTarget === null || scrollTarget === 0) return;
+
+      // Hide the page while we jump to the saved position so the user
+      // doesn't see the scroll animate down — they just appear there.
+      const main = document.getElementById('main-content');
+      if (main) main.style.visibility = 'hidden';
+
+      const tryRestore = (attempts: number) => {
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: scrollTarget, behavior: 'instant' as ScrollBehavior });
+          if (attempts > 0) {
+            setTimeout(() => tryRestore(attempts - 1), 60);
+          } else {
+            // All attempts done — reveal the page at the final position
+            requestAnimationFrame(() => {
+              if (main) main.style.visibility = '';
+            });
+          }
+        });
+      };
+      setTimeout(() => tryRestore(4), 10);
+    };
+    window.addEventListener('popstate', onPopState);
+
+    cleanup(() => {
+      window.removeEventListener('scroll', onScroll);
+      document.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('popstate', onPopState);
+      if (scrollTimer) clearTimeout(scrollTimer);
+    });
+  });
+
+  // ── Restore scroll when navigating to Home (or any page) via link ─────
+  // Popstate handles back/forward; this handles clicking Home / nav links.
+  useVisibleTask$(({ track, cleanup }) => {
+    track(() => loc.url.pathname);
+    track(() => loc.url.search);
+    const pathname = loc.url.pathname;
+    const key = loc.url.pathname + loc.url.search;
+    const SCROLL_KEY = 'purplesky-scroll-positions';
+    function getScrollMap(): Record<string, number> {
+      try {
+        const raw = sessionStorage.getItem(SCROLL_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch { return {}; }
+    }
+    const scrollTarget = getScrollMap()[key];
+    if (scrollTarget == null || scrollTarget <= 0) return;
+    const main = document.getElementById('main-content');
+    if (main) main.style.visibility = 'hidden';
+    const tryRestore = (attempts: number) => {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: scrollTarget, behavior: 'instant' as ScrollBehavior });
+        if (attempts > 0) {
+          setTimeout(() => tryRestore(attempts - 1), 60);
+        } else {
+          requestAnimationFrame(() => {
+            if (main) main.style.visibility = '';
+          });
+        }
+      });
+    };
+    const t = setTimeout(() => tryRestore(4), 50);
+    cleanup(() => clearTimeout(t));
+  });
 
   // ── Restore session & theme on first load (browser only) ──────────────
   useVisibleTask$(async () => {
@@ -52,6 +177,14 @@ export default component$(() => {
     // Restore view columns
     const savedCols = localStorage.getItem('purplesky-view-columns');
     if (savedCols) store.viewColumns = parseInt(savedCols) as 1 | 2 | 3;
+
+    // Restore card view mode and NSFW preference
+    const savedCardView = localStorage.getItem('purplesky-card-view') as CardViewMode | null;
+    if (savedCardView === 'full' || savedCardView === 'mini' || savedCardView === 'art') store.cardViewMode = savedCardView;
+    const savedNsfw = localStorage.getItem('purplesky-nsfw-mode') as 'hide' | 'blur' | 'show' | null;
+    if (savedNsfw === 'hide' || savedNsfw === 'blur' || savedNsfw === 'show') store.nsfwMode = savedNsfw;
+    const savedMediaOnly = localStorage.getItem('purplesky-media-only');
+    if (savedMediaOnly === '1') store.mediaOnly = true;
 
     // Restore session
     try {
@@ -107,51 +240,15 @@ export default component$(() => {
     }
   });
 
-  // Close dropdowns on outside click
+  // Close account dropdown on outside click
   useVisibleTask$(({ track, cleanup }) => {
-    track(() => searchOpen.value);
     track(() => accountMenuOpen.value);
     const close = (e: Event) => {
       const t = e.target as Node;
-      if (searchOpen.value && searchWrapRef.value && !searchWrapRef.value.contains(t)) searchOpen.value = false;
       if (accountMenuOpen.value && accountWrapRef.value && !accountWrapRef.value.contains(t)) accountMenuOpen.value = false;
     };
     document.addEventListener('click', close);
     cleanup(() => document.removeEventListener('click', close));
-  });
-
-  // Debounced search when query length >= 2
-  useVisibleTask$(async ({ track, cleanup }) => {
-    track(() => searchQuery.value);
-    const q = searchQuery.value.trim();
-    if (q.length < 2) {
-      searchResults.value = { actors: [], posts: [] };
-      searchOpen.value = false;
-      return;
-    }
-    const t = setTimeout(async () => {
-      searchLoading.value = true;
-      try {
-        const [actorRes, postRes] = await Promise.all([
-          import('~/lib/bsky').then((m) => m.searchActorsTypeahead(q, 5)),
-          import('~/lib/bsky').then((m) => m.searchPostsByQuery(q, undefined)),
-        ]);
-        const actors = (actorRes as { actors?: Array<{ did: string; handle: string; displayName?: string; avatar?: string }> }).actors ?? [];
-        const posts = (postRes.posts ?? []).slice(0, 5);
-        searchResults.value = { actors, posts };
-        searchOpen.value = true;
-      } catch {
-        searchResults.value = { actors: [], posts: [] };
-      }
-      searchLoading.value = false;
-    }, 300);
-    cleanup(() => clearTimeout(t));
-  });
-
-  const onSearchSubmit = $(() => {
-    const q = searchQuery.value.trim();
-    if (q) nav(`/search?q=${encodeURIComponent(q)}`);
-    searchOpen.value = false;
   });
 
   const onLogout = $(async () => {
@@ -174,9 +271,97 @@ export default component$(() => {
     localStorage.setItem('purplesky-theme', next);
   });
 
+  // ── Global Keyboard Shortcuts ──────────────────────────────────────────
+  useVisibleTask$(({ cleanup }) => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when login modal or about dialog is open
+      if (store.showLoginModal || store.showComposeModal) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          store.showLoginModal = false;
+          store.showComposeModal = false;
+        }
+        return;
+      }
+      if (showAbout.value) {
+        if (e.key === 'Escape' || e.key.toLowerCase() === 'q') {
+          e.preventDefault();
+          showAbout.value = false;
+        }
+        return;
+      }
+
+      // Don't intercept when typing in inputs
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          target.blur();
+        }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) return;
+
+      const key = e.key.toLowerCase();
+
+      // 1/2/3 = column count
+      if (key === '1' || key === '2' || key === '3') {
+        e.preventDefault();
+        store.viewColumns = parseInt(key) as 1 | 2 | 3;
+        localStorage.setItem('purplesky-view-columns', key);
+        return;
+      }
+
+      // T = cycle theme
+      if (key === 't') {
+        e.preventDefault();
+        const modes: ThemeMode[] = ['dark', 'light', 'high-contrast', 'system'];
+        const idx = modes.indexOf(store.theme);
+        const next = modes[(idx + 1) % modes.length];
+        store.theme = next;
+        document.documentElement.setAttribute('data-theme', next === 'system' ? '' : next);
+        localStorage.setItem('purplesky-theme', next);
+        return;
+      }
+
+      // Escape = close any open dropdown
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        accountMenuOpen.value = false;
+        return;
+      }
+
+      // / = go to search page
+      if (key === '/') {
+        e.preventDefault();
+        nav('/search/');
+        return;
+      }
+
+      // ? = show keyboard shortcuts help
+      if (e.key === '?') {
+        e.preventDefault();
+        showAbout.value = true;
+        return;
+      }
+
+      // Q = go back (except on feed page where it's handled by feed nav)
+      if (key === 'q' && e.key !== 'Backspace') {
+        const path = loc.url.pathname;
+        if (path !== '/' && !path.startsWith('/feed')) {
+          e.preventDefault();
+          window.history.back();
+        }
+        return;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    cleanup(() => window.removeEventListener('keydown', onKeyDown));
+  });
+
   // ── Nav Items ───────────────────────────────────────────────────────────
   const navItems = [
-    { href: '/', label: 'Feed', icon: 'home' },
+    { href: '/', label: 'Home', icon: 'home' },
     { href: '/forum/', label: 'Forums', icon: 'forum' },
     { href: '/consensus/', label: 'Consensus', icon: 'consensus' },
     { href: '/collab/', label: 'Collab', icon: 'collab' },
@@ -185,130 +370,154 @@ export default component$(() => {
 
   return (
     <div class="app-shell">
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <header class="header glass">
-        <div class="header-left">
-          <Link href="/" class="logo-link" aria-label="PurpleSky Home">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <circle cx="14" cy="14" r="13" stroke="var(--accent)" stroke-width="2" />
-              <circle cx="14" cy="14" r="6" fill="var(--accent)" />
-            </svg>
-            <span class="logo-text">PurpleSky</span>
-          </Link>
-        </div>
-
-        <div class="header-center" ref={searchWrapRef}>
-          <form class="search-bar" preventdefault:submit onSubmit$={onSearchSubmit}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2">
-              <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
-            </svg>
-            <input
-              type="search"
-              placeholder="Search posts, people, tags..."
-              class="search-input"
-              bind:value={searchQuery}
-              onFocus$={() => { if (searchResults.value.actors.length || searchResults.value.posts.length) searchOpen.value = true; }}
-            />
-          </form>
-          {searchOpen.value && (searchLoading.value || searchResults.value.actors.length > 0 || searchResults.value.posts.length > 0) && (
-            <div class="search-dropdown glass">
-              {searchLoading.value && (
-                <div class="search-dropdown-section">
-                  <div style={{ padding: 'var(--space-md)', color: 'var(--muted)', fontSize: 'var(--font-sm)' }}>Searching…</div>
-                </div>
-              )}
-              {!searchLoading.value && searchResults.value.actors.length > 0 && (
-                <div class="search-dropdown-section">
-                  <div class="search-dropdown-section-title">People</div>
-                  {searchResults.value.actors.map((a) => (
-                    <Link key={a.did} href={`/profile/${encodeURIComponent(a.handle)}/`} onClick$={() => { searchOpen.value = false; }}>
-                      {a.avatar && <img src={a.avatar} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />}
-                      <span>{a.displayName || a.handle}</span>
-                      <span style={{ color: 'var(--muted)', fontSize: 'var(--font-xs)' }}>@{a.handle}</span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-              {!searchLoading.value && searchResults.value.posts.length > 0 && (
-                <div class="search-dropdown-section">
-                  <div class="search-dropdown-section-title">Posts</div>
-                  {searchResults.value.posts.map((p) => (
-                    <Link key={p.uri} href={`/post/${encodeURIComponent(p.uri)}/`} onClick$={() => { searchOpen.value = false; }}>
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {(p.record?.text ?? '').slice(0, 60)}{(p.record?.text?.length ?? 0) > 60 ? '…' : ''}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-              {!searchLoading.value && (
-                <div class="search-dropdown-section">
-                  <Link href={`/search?q=${encodeURIComponent(searchQuery.value.trim())}`} onClick$={() => { searchOpen.value = false; }}>
-                    See all results for "{searchQuery.value.trim()}"
-                  </Link>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div class="header-right">
-          {/* Theme toggle */}
-          <button class="icon-btn" onClick$={cycleTheme} aria-label="Toggle theme" title={`Theme: ${store.theme}`}>
-            {store.theme === 'dark' && (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-              </svg>
-            )}
-            {store.theme === 'light' && (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-              </svg>
-            )}
-            {(store.theme === 'system' || store.theme === 'high-contrast') && (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="3" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2" />
-              </svg>
-            )}
-          </button>
-
-          {/* Account / Login */}
-          {store.session.isLoggedIn ? (
-            <div style={{ position: 'relative' }} ref={accountWrapRef}>
-              <button
-                class="avatar-btn"
-                aria-label="Account menu"
-                aria-expanded={accountMenuOpen.value}
-                onClick$={() => { accountMenuOpen.value = !accountMenuOpen.value; }}
-              >
-                {store.session.avatar ? (
-                  <img src={store.session.avatar} alt="" width="32" height="32" class="avatar-img" />
-                ) : (
-                  <div class="avatar-placeholder">
-                    {(store.session.handle ?? '?')[0].toUpperCase()}
+      {/* ── Floating top-right: Account or Login (no top navbar) ───────────── */}
+      <div class="floating-top-right" ref={accountWrapRef}>
+        {store.session.isLoggedIn ? (
+          <>
+            {/* New post to the left of account */}
+            <button
+              class="floating-fab float-btn"
+              aria-label="New post"
+              onClick$={() => { store.showComposeModal = true; }}
+            >
+              New post
+            </button>
+            <div class="floating-top-right-col">
+              <div class="account-btn-wrap">
+                <button
+                  class="floating-fab float-btn"
+                  aria-label="Account menu"
+                  aria-expanded={accountMenuOpen.value}
+                  onClick$={() => { accountMenuOpen.value = !accountMenuOpen.value; }}
+                >
+                  {store.session.avatar ? (
+                    <img src={store.session.avatar} alt="" width="28" height="28" class="floating-avatar" />
+                  ) : (
+                    <span class="floating-avatar-placeholder">{(store.session.handle ?? '?')[0].toUpperCase()}</span>
+                  )}
+                </button>
+                {accountMenuOpen.value && (
+                  <div class="account-dropdown glass-strong">
+                    {store.session.handle && (
+                      <Link href={`/profile/${encodeURIComponent(store.session.handle)}/`} onClick$={() => { accountMenuOpen.value = false; }}>
+                        Profile
+                      </Link>
+                    )}
+                    <Link href="/search/" onClick$={() => { accountMenuOpen.value = false; }}>Search</Link>
+                    <button type="button" onClick$={() => { cycleTheme(); accountMenuOpen.value = false; }}>
+                      Theme
+                    </button>
+                    <button type="button" onClick$={() => onLogout()}>
+                      Log out
+                    </button>
                   </div>
                 )}
-              </button>
-              {accountMenuOpen.value && (
-                <div class="account-dropdown glass">
-                  {store.session.handle && (
-                    <Link href={`/profile/${encodeURIComponent(store.session.handle)}/`} onClick$={() => { accountMenuOpen.value = false; }}>
-                      Profile
-                    </Link>
+              </div>
+              {/* Toggle buttons: card view (cycle), NSFW/blur (cycle), media only (toggle) */}
+              <div class="float-toggles">
+                {/* Card view: one button cycles Full → Mini → Art */}
+                <button
+                  type="button"
+                  class="float-toggle-btn float-btn"
+                  aria-label={`Card view: ${store.cardViewMode} (click to cycle)`}
+                  title={`Card view: ${store.cardViewMode}`}
+                  onClick$={() => {
+                    const next = store.cardViewMode === 'full' ? 'mini' : store.cardViewMode === 'mini' ? 'art' : 'full';
+                    store.cardViewMode = next;
+                    localStorage.setItem('purplesky-card-view', next);
+                    store.toastMessage = next === 'full' ? 'Full cards' : next === 'mini' ? 'Mini cards' : 'Art cards';
+                  }}
+                >
+                  {store.cardViewMode === 'full' && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <line x1="3" y1="9" x2="21" y2="9" />
+                      <line x1="3" y1="14" x2="18" y2="14" />
+                    </svg>
                   )}
-                  <button type="button" onClick$={() => onLogout()}>
-                    Log out
-                  </button>
-                </div>
-              )}
+                  {store.cardViewMode === 'mini' && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="5" y="8" width="14" height="8" rx="1" />
+                    </svg>
+                  )}
+                  {store.cardViewMode === 'art' && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="2" y="2" width="20" height="20" rx="2" />
+                      <circle cx="12" cy="12" r="4" />
+                    </svg>
+                  )}
+                </button>
+                {/* NSFW/Blur: one button cycles SFW → Blur → NSFW */}
+                <button
+                  type="button"
+                  class="float-toggle-btn float-btn"
+                  aria-label={`Content: ${store.nsfwMode === 'hide' ? 'SFW' : store.nsfwMode === 'blur' ? 'Blur' : 'NSFW'} (click to cycle)`}
+                  title={`Content: ${store.nsfwMode === 'hide' ? 'SFW' : store.nsfwMode === 'blur' ? 'Blur' : 'NSFW'}`}
+                  onClick$={() => {
+                    const next = store.nsfwMode === 'hide' ? 'blur' : store.nsfwMode === 'blur' ? 'show' : 'hide';
+                    store.nsfwMode = next;
+                    localStorage.setItem('purplesky-nsfw-mode', next);
+                    store.toastMessage = next === 'hide' ? 'SFW' : next === 'blur' ? 'Blur' : 'NSFW';
+                  }}
+                >
+                  {store.nsfwMode === 'hide' && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                      <path d="M1 1l22 22" />
+                      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                    </svg>
+                  )}
+                  {store.nsfwMode === 'blur' && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+                    </svg>
+                  )}
+                  {store.nsfwMode === 'show' && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
+                {/* Media only: one button toggles Media only ↔ Media and text */}
+                <button
+                  type="button"
+                  class="float-toggle-btn float-btn"
+                  aria-label={store.mediaOnly ? 'Media only (click for media and text)' : 'Media and text (click for media only)'}
+                  title={store.mediaOnly ? 'Media only' : 'Media and text'}
+                  onClick$={() => {
+                    store.mediaOnly = !store.mediaOnly;
+                    try { localStorage.setItem('purplesky-media-only', store.mediaOnly ? '1' : '0'); } catch { /* ignore */ }
+                    store.toastMessage = store.mediaOnly ? 'Media only' : 'Media and text';
+                  }}
+                >
+                  {store.mediaOnly ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="8" y1="6" x2="21" y2="6" />
+                      <line x1="8" y1="12" x2="21" y2="12" />
+                      <line x1="8" y1="18" x2="21" y2="18" />
+                      <line x1="3" y1="6" x2="3.01" y2="6" />
+                      <line x1="3" y1="12" x2="3.01" y2="12" />
+                      <line x1="3" y1="18" x2="3.01" y2="18" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
-          ) : (
-            <button class="btn" onClick$={() => { store.showLoginModal = true; }}>
-              Log In
-            </button>
-          )}
-        </div>
-      </header>
+          </>
+        ) : (
+          <button class="floating-fab floating-login float-btn" onClick$={() => { store.showLoginModal = true; }} aria-label="Log in">
+            Log in
+          </button>
+        )}
+      </div>
 
       {/* ── Main Content ───────────────────────────────────────────────── */}
       <main id="main-content" class="main-content">
@@ -338,6 +547,52 @@ export default component$(() => {
 
       {/* ── Login Modal ────────────────────────────────────────────────── */}
       {store.showLoginModal && <LoginModal />}
+
+      {/* ── Compose Modal ───────────────────────────────────────────────── */}
+      {store.showComposeModal && <ComposeModal />}
+
+      {/* ── Global toast (e.g. card view mode, hide seen) ────────────────── */}
+      {store.toastMessage && (
+        <div class="app-toast float-btn" role="status" aria-live="polite">
+          {store.toastMessage}
+        </div>
+      )}
+
+      {/* ── Keyboard Shortcuts Help ────────────────────────────────────── */}
+      {showAbout.value && (
+        <div class="modal-overlay" onClick$={() => { showAbout.value = false; }}>
+          <div class="modal-card glass-strong" onClick$={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <h2 class="modal-title">PurpleSky</h2>
+            <p style={{ color: 'var(--muted)', marginBottom: 'var(--space-lg)', fontSize: 'var(--font-sm)' }}>
+              A Bluesky client for art, forums, consensus, and collaboration. Keyboard-friendly navigation.
+            </p>
+            <h3 style={{ fontWeight: '700', marginBottom: 'var(--space-sm)', fontSize: 'var(--font-md)' }}>Keyboard Shortcuts</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px var(--space-lg)', fontSize: 'var(--font-sm)' }}>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>W / ↑</kbd><span style={{ color: 'var(--muted)' }}>Move up</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>A / ←</kbd><span style={{ color: 'var(--muted)' }}>Move left</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>S / ↓</kbd><span style={{ color: 'var(--muted)' }}>Move down</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>D / →</kbd><span style={{ color: 'var(--muted)' }}>Move right</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>E</kbd><span style={{ color: 'var(--muted)' }}>Enter / open post</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>R</kbd><span style={{ color: 'var(--muted)' }}>Reply to post</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>F</kbd><span style={{ color: 'var(--muted)' }}>Like / unlike</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>C</kbd><span style={{ color: 'var(--muted)' }}>Collect (save to artboard)</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>Q</kbd><span style={{ color: 'var(--muted)' }}>Quit / go back</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>T</kbd><span style={{ color: 'var(--muted)' }}>Toggle theme</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>1 / 2 / 3</kbd><span style={{ color: 'var(--muted)' }}>Column count</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>/</kbd><span style={{ color: 'var(--muted)' }}>Go to search page</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>Escape</kbd><span style={{ color: 'var(--muted)' }}>Close / unfocus</span>
+              <kbd style={{ fontWeight: '600', fontFamily: 'monospace' }}>?</kbd><span style={{ color: 'var(--muted)' }}>Show this help</span>
+            </div>
+            <button
+              class="modal-close"
+              onClick$={() => { showAbout.value = false; }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -393,12 +648,57 @@ const NavIcon = component$<{ name: string; active: boolean }>(({ name, active })
 const LoginModal = component$(() => {
   const store = useAppState();
 
+  const handleInput = useSignal('');
+  const suggestions = useSignal<Array<{ did: string; handle: string; displayName?: string; avatar?: string }>>([]);
+  const suggestionsLoading = useSignal(false);
+  const showSuggestions = useSignal(false);
+  const loginError = useSignal('');
+  const loginLoading = useSignal(false);
+  const suggestionsRef = useSignal<HTMLElement>();
+
+  // Debounced typeahead search as user types
+  useVisibleTask$(async ({ track, cleanup }) => {
+    track(() => handleInput.value);
+    const q = handleInput.value.trim();
+    if (q.length < 2) {
+      suggestions.value = [];
+      showSuggestions.value = false;
+      return;
+    }
+    const t = setTimeout(async () => {
+      suggestionsLoading.value = true;
+      try {
+        const { searchActorsTypeahead } = await import('~/lib/bsky');
+        const res = await searchActorsTypeahead(q, 6);
+        const actors = (res as { actors?: Array<{ did: string; handle: string; displayName?: string; avatar?: string }> }).actors ?? [];
+        suggestions.value = actors;
+        showSuggestions.value = actors.length > 0;
+      } catch {
+        suggestions.value = [];
+      }
+      suggestionsLoading.value = false;
+    }, 250);
+    cleanup(() => clearTimeout(t));
+  });
+
+  const selectSuggestion = $((handle: string) => {
+    handleInput.value = handle;
+    showSuggestions.value = false;
+  });
+
   const handleOAuthLogin = $(async (handle: string) => {
+    if (!handle) return;
+    loginError.value = '';
+    loginLoading.value = true;
     try {
-      const { signInWithOAuthRedirect } = await import('~/lib/oauth');
-      await signInWithOAuthRedirect(handle);
+      const { signInWithOAuthRedirect, normalizeHandle } = await import('~/lib/oauth');
+      const normalized = normalizeHandle(handle);
+      handleInput.value = normalized;
+      await signInWithOAuthRedirect(normalized);
     } catch (err) {
       console.error('OAuth login failed:', err);
+      loginError.value = err instanceof Error ? err.message : 'Login failed. Check your handle and try again.';
+      loginLoading.value = false;
     }
   });
 
@@ -406,27 +706,82 @@ const LoginModal = component$(() => {
     <div class="modal-overlay" onClick$={() => { store.showLoginModal = false; }}>
       <div class="modal-card glass-strong" onClick$={(e) => e.stopPropagation()}>
         <h2 class="modal-title">Log in with Bluesky</h2>
-        <p class="modal-subtitle">Enter your Bluesky handle to continue</p>
+        <p class="modal-subtitle">Enter your Bluesky handle or custom domain</p>
 
         <form
           preventdefault:submit
-          onSubmit$={(_, target) => {
-            const formData = new FormData(target as HTMLFormElement);
-            const handle = (formData.get('handle') as string)?.trim();
+          onSubmit$={() => {
+            const handle = handleInput.value.trim();
             if (handle) handleOAuthLogin(handle);
           }}
         >
-          <input
-            name="handle"
-            type="text"
-            placeholder="yourname.bsky.social"
-            class="modal-input"
-            autoFocus
-          />
-          <button type="submit" class="btn modal-submit">
-            Continue with Bluesky
+          <div style={{ position: 'relative' }} ref={suggestionsRef}>
+            <input
+              type="text"
+              placeholder="yourname.bsky.social or custom.domain"
+              class="modal-input"
+              autoFocus
+              bind:value={handleInput}
+              onFocus$={() => { if (suggestions.value.length > 0) showSuggestions.value = true; }}
+              onBlur$={() => { setTimeout(() => { showSuggestions.value = false; }, 200); }}
+            />
+            {/* Typeahead suggestions dropdown */}
+            {showSuggestions.value && suggestions.value.length > 0 && (
+              <div class="login-suggestions glass" style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                borderRadius: 'var(--glass-radius-sm)', overflow: 'hidden',
+                maxHeight: '240px', overflowY: 'auto',
+              }}>
+                {suggestions.value.map((actor) => (
+                  <button
+                    key={actor.did}
+                    type="button"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 'var(--space-sm)',
+                      width: '100%', padding: 'var(--space-sm) var(--space-md)',
+                      textAlign: 'left', background: 'none', border: 'none',
+                      color: 'var(--text)', cursor: 'pointer', fontSize: 'var(--font-sm)',
+                      minHeight: 'auto',
+                    }}
+                    onClick$={() => selectSuggestion(actor.handle)}
+                    onMouseDown$={(e) => e.preventDefault()}
+                  >
+                    {actor.avatar && (
+                      <img src={actor.avatar} alt="" width="28" height="28" style={{ borderRadius: '50%', flexShrink: 0 }} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {actor.displayName && (
+                        <div style={{ fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {actor.displayName}
+                        </div>
+                      )}
+                      <div style={{ color: 'var(--muted)', fontSize: 'var(--font-xs)' }}>@{actor.handle}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {suggestionsLoading.value && (
+              <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)' }}>
+                <div class="spinner" style={{ width: '16px', height: '16px' }} />
+              </div>
+            )}
+          </div>
+
+          {loginError.value && (
+            <p style={{ color: 'var(--danger)', fontSize: 'var(--font-sm)', marginTop: 'var(--space-sm)' }}>
+              {loginError.value}
+            </p>
+          )}
+
+          <button type="submit" class="btn modal-submit" disabled={loginLoading.value}>
+            {loginLoading.value ? 'Redirecting…' : 'Continue with Bluesky'}
           </button>
         </form>
+
+        <p style={{ color: 'var(--muted)', fontSize: 'var(--font-xs)', marginTop: 'var(--space-md)', textAlign: 'center' }}>
+          Works with any AT Protocol PDS — just enter your full handle.
+        </p>
 
         <button
           class="modal-close"

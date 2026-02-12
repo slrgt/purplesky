@@ -23,15 +23,36 @@
  */
 
 import { component$, useSignal, useVisibleTask$, useStore, $ } from '@builder.io/qwik';
+import { useNavigate } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
 import { PostCard } from '~/components/post-card/post-card';
 import { FeedSelector } from '~/components/feed-selector/feed-selector';
 import type { TimelineItem } from '~/lib/types';
+import * as bsky from '~/lib/bsky';
 
 import './feed.css';
 
+// ── Feed Cache ────────────────────────────────────────────────────────────
+// Module-level cache that survives route changes (QwikCity SPA navigation
+// keeps the same JS context). When the user navigates back to the feed,
+// the cached items render instantly so scroll position can be restored.
+const feedCache: {
+  items: TimelineItem[];
+  cursors: Record<string, string>;
+  sortedItems: TimelineItem[];
+  forDid: string | null; // track which account the cache belongs to
+} = { items: [], cursors: {}, sortedItems: [], forDid: null };
+
 export default component$(() => {
   const app = useAppState();
+  const nav = useNavigate();
+
+  // ── Keyboard Focus State ────────────────────────────────────────────────
+  /** Index of keyboard-focused post in displayItems (-1 = none) */
+  const focusedIndex = useSignal(-1);
+  const keyboardNavActive = useSignal(false);
+  /** Index of card under the mouse (-1 = none); keeps hover look during keyboard nav */
+  const mouseOverIndex = useSignal(-1);
 
   // ── Feed State ──────────────────────────────────────────────────────────
   /** Cursors: for mixed feed use keys like 'timeline', at://...; for guest use 'guest'. */
@@ -40,18 +61,27 @@ export default component$(() => {
     loading: boolean;
     cursors: Record<string, string>;
     error: string | null;
+    restoredFromCache: boolean;
   }>({
     items: [],
     loading: true,
     cursors: {},
     error: null,
+    restoredFromCache: false,
   });
 
   /** Which sort algorithm to use */
-  const sortMode = useSignal<'newest' | 'trending' | 'wilson' | 'controversial'>('newest');
+  const sortMode = useSignal<'newest' | 'trending' | 'wilson' | 'score' | 'controversial'>('newest');
 
   /** Set of seen post URIs (tracked locally) */
   const seenPosts = useSignal<Set<string>>(new Set());
+
+
+  /** URIs hidden by "hide seen" this session; long-press restores by clearing this */
+  const hiddenSeenUris = useSignal<Set<string>>(new Set());
+
+  /** Set by long-press so the following click doesn't trigger hide again */
+  const skipNextHideClick = useSignal(false);
 
   /** Downvote counts per post URI (from Microcosm); populated after feed loads */
   const downvoteCounts = useSignal<Record<string, number>>({});
@@ -70,6 +100,9 @@ export default component$(() => {
 
   /** Set of post URIs that are in at least one artboard (for card outline) */
   const inAnyArtboardUris = useSignal<Set<string>>(new Set());
+
+  /** Post URIs user has tapped to unblur (NSFW blur mode) */
+  const unblurredNsfwUris = useSignal<Set<string>>(new Set());
 
   // ── Guest feed handles (shown when not logged in) ───────────────────────
   const GUEST_HANDLES = [
@@ -111,6 +144,10 @@ export default component$(() => {
       feed.error = err instanceof Error ? err.message : 'Failed to load feed';
     }
     feed.loading = false;
+    // Write through to module-level cache so back-navigation restores instantly
+    feedCache.items = [...feed.items];
+    feedCache.cursors = { ...feed.cursors };
+    feedCache.forDid = app.session.did;
   });
 
   // ── Initial Load ────────────────────────────────────────────────────────
@@ -119,7 +156,105 @@ export default component$(() => {
       const raw = localStorage.getItem('purplesky-seen-posts');
       if (raw) seenPosts.value = new Set(JSON.parse(raw));
     } catch { /* ignore */ }
+
+    // Check if we have a valid cache for this account (back-navigation)
+    const cacheMatchesAccount = feedCache.forDid === app.session.did ||
+      (!app.session.did && feedCache.forDid === null);
+    if (feedCache.items.length > 0 && cacheMatchesAccount) {
+      // Restore from cache — renders immediately so scroll position works
+      feed.items = feedCache.items;
+      feed.cursors = feedCache.cursors;
+      feed.loading = false;
+      feed.restoredFromCache = true;
+      if (feedCache.sortedItems.length > 0) {
+        sortedDisplayItems.value = feedCache.sortedItems;
+      }
+      return; // Don't reload — user navigated back
+    }
+
+    // No cache or wrong account — load fresh
     setTimeout(() => loadFeed(), 300);
+  });
+
+  // ── Hide floating buttons after scrolling past a threshold; show when scroll stops ───
+  useVisibleTask$(({ cleanup }) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const stopScrollDelay = 200;
+    const scrollThreshold = 48; // px: must scroll this much before buttons start disappearing (avoids dropdown/tap jitter)
+    let scrollYAtRest = typeof window !== 'undefined' ? window.scrollY : 0;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (document.body.classList.contains('feed-scrolling')) {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          document.body.classList.remove('feed-scrolling');
+          scrollYAtRest = window.scrollY;
+          timeoutId = undefined;
+        }, stopScrollDelay);
+      } else if (Math.abs(y - scrollYAtRest) >= scrollThreshold) {
+        document.body.classList.add('feed-scrolling');
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          document.body.classList.remove('feed-scrolling');
+          scrollYAtRest = window.scrollY;
+          timeoutId = undefined;
+        }, stopScrollDelay);
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    cleanup(() => {
+      window.removeEventListener('scroll', onScroll);
+      if (timeoutId) clearTimeout(timeoutId);
+      document.body.classList.remove('feed-scrolling');
+    });
+  });
+
+  // ── Refresh feed when a new post is published (e.g. from compose modal) ─
+  useVisibleTask$(({ cleanup }) => {
+    const onRefresh = () => loadFeed();
+    window.addEventListener('purplesky-feed-refresh', onRefresh);
+    cleanup(() => window.removeEventListener('purplesky-feed-refresh', onRefresh));
+  });
+
+  // ── Reload feed when login state changes ────────────────────────────────
+  // This catches the case where session restore finishes after the initial
+  // feed load (race condition), and also handles login/logout during the session.
+  useVisibleTask$(({ track }) => {
+    const isLoggedIn = track(() => app.session.isLoggedIn);
+    const did = track(() => app.session.did);
+    // Skip the very first run (initial load handles it above)
+    if (feed.items.length === 0 && feed.loading) return;
+    // If we restored from cache and session just confirmed, don't reload
+    if (feed.restoredFromCache && feed.items.length > 0) {
+      feed.restoredFromCache = false;
+      // But if the DID changed (different account), we do need to reload
+      if (feedCache.forDid === did) return;
+    }
+    // When session state changes, reload the feed from scratch
+    loadFeed();
+  });
+
+  // ── Reload feed when feed mix changes (debounced so slider doesn’t trigger constant reload) ───
+  const feedMixInitialized = useSignal(false);
+  const feedMixReloadTimeout = useSignal<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useVisibleTask$(({ track, cleanup }) => {
+    track(() => JSON.stringify(app.feedMix.map((e) => ({ uri: e.source.uri ?? e.source.kind, p: e.percent }))));
+    if (!feedMixInitialized.value) {
+      feedMixInitialized.value = true;
+      return;
+    }
+    if (!app.session.isLoggedIn) return;
+    if (feedMixReloadTimeout.value !== undefined) clearTimeout(feedMixReloadTimeout.value);
+    feedMixReloadTimeout.value = setTimeout(() => {
+      feedMixReloadTimeout.value = undefined;
+      loadFeed();
+    }, 600);
+    cleanup(() => {
+      if (feedMixReloadTimeout.value !== undefined) {
+        clearTimeout(feedMixReloadTimeout.value);
+        feedMixReloadTimeout.value = undefined;
+      }
+    });
   });
 
   // ── Fetch downvote counts when feed items change ─────────────────────────
@@ -139,13 +274,8 @@ export default component$(() => {
     track(() => feed.items.length);
     track(() => sortMode.value);
     track(() => downvoteCounts.value);
-    track(() => app.hideSeenPosts);
-    track(() => seenPosts.value);
 
-    const filtered = feed.items.filter((item) => {
-      if (app.hideSeenPosts && seenPosts.value.has(item.post.uri)) return false;
-      return true;
-    });
+    const filtered = [...feed.items];
     if (filtered.length === 0) {
       sortedDisplayItems.value = [];
       return;
@@ -165,6 +295,7 @@ export default component$(() => {
       sortByNewest,
       sortByTrending,
       sortByWilsonScore,
+      sortByScore,
       sortByControversial,
     } = await import('~/lib/wasm-bridge');
 
@@ -176,6 +307,9 @@ export default component$(() => {
       case 'wilson':
         ordered = await sortByWilsonScore(sortable);
         break;
+      case 'score':
+        ordered = await sortByScore(sortable);
+        break;
       case 'controversial':
         ordered = await sortByControversial(sortable);
         break;
@@ -185,6 +319,8 @@ export default component$(() => {
 
     const byUri = new Map(filtered.map((i) => [i.post.uri, i]));
     sortedDisplayItems.value = ordered.map((s) => byUri.get(s.uri)).filter(Boolean) as TimelineItem[];
+    // Update cache with sorted order for instant back-navigation restore
+    feedCache.sortedItems = [...sortedDisplayItems.value];
   });
 
   // ── Load More (infinite scroll) ─────────────────────────────────────────
@@ -277,20 +413,200 @@ export default component$(() => {
     } catch { /* ignore */ }
   });
 
-  // Use WASM-sorted list when ready, otherwise filter in place for first paint
-  const displayItems =
+  // ── Feed Keyboard Navigation ────────────────────────────────────────────
+  useVisibleTask$(({ cleanup }) => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs or modals open
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey) return;
+
+      const key = e.key.toLowerCase();
+      const isNavKey = key === 'w' || key === 's' || key === 'a' || key === 'd' ||
+        e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
+        key === 'e' || key === 'f' || key === 'c' || key === 'r' || key === 'q';
+      if (!isNavKey) return;
+
+      const items = sortedDisplayItems.value.length > 0
+        ? sortedDisplayItems.value
+        : feed.items;
+      if (items.length === 0) return;
+
+      const cols = app.viewColumns;
+      const i = focusedIndex.value;
+
+      // Navigation: W/S/A/D and arrows
+      if (key === 'w' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        keyboardNavActive.value = true;
+        if (cols <= 1) {
+          focusedIndex.value = Math.max(0, i - 1);
+        } else {
+          focusedIndex.value = i - cols >= 0 ? i - cols : i;
+        }
+        scrollFocusedIntoView();
+        return;
+      }
+      if (key === 's' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        keyboardNavActive.value = true;
+        if (cols <= 1) {
+          focusedIndex.value = Math.min(items.length - 1, i + 1);
+        } else {
+          focusedIndex.value = i + cols < items.length ? i + cols : i;
+        }
+        scrollFocusedIntoView();
+        return;
+      }
+      if (key === 'a' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        keyboardNavActive.value = true;
+        // Don't move past the leftmost column
+        const col = i % cols;
+        focusedIndex.value = col === 0 ? i : i - 1;
+        scrollFocusedIntoView();
+        return;
+      }
+      if (key === 'd' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        keyboardNavActive.value = true;
+        // Don't move past the rightmost column
+        const col = i % cols;
+        focusedIndex.value = col === cols - 1 ? i : i + 1;
+        scrollFocusedIntoView();
+        return;
+      }
+
+      // Q = deselect / close actions menu on feed
+      if (key === 'q') {
+        e.preventDefault();
+        focusedIndex.value = -1;
+        keyboardNavActive.value = false;
+        return;
+      }
+
+      // Action keys require a focused post
+      if (i < 0 || i >= items.length) return;
+      const item = items[i];
+
+      // E = Enter/open post
+      if (key === 'e') {
+        e.preventDefault();
+        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        return;
+      }
+
+      // F = Like/unlike
+      if (key === 'f') {
+        e.preventDefault();
+        // Dispatch a custom event that PostCard can listen for
+        const card = document.querySelector(`[data-post-uri="${CSS.escape(item.post.uri)}"]`);
+        if (card) card.dispatchEvent(new CustomEvent('keyboard-like', { bubbles: true }));
+        return;
+      }
+
+      // C = Collect (save to artboard)
+      if (key === 'c') {
+        e.preventDefault();
+        const card = document.querySelector(`[data-post-uri="${CSS.escape(item.post.uri)}"]`);
+        if (card) card.dispatchEvent(new CustomEvent('keyboard-collect', { bubbles: true }));
+        return;
+      }
+
+      // R = Reply (navigate to post with reply intent)
+      if (key === 'r') {
+        e.preventDefault();
+        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        return;
+      }
+    };
+
+    const scrollFocusedIntoView = () => {
+      requestAnimationFrame(() => {
+        const idx = focusedIndex.value;
+        const cards = document.querySelectorAll('[data-post-uri]');
+        // Find the card at the focused index
+        const items = sortedDisplayItems.value.length > 0
+          ? sortedDisplayItems.value
+          : feed.items;
+        if (idx >= 0 && idx < items.length) {
+          const uri = items[idx]?.post?.uri;
+          if (uri) {
+            const el = document.querySelector(`[data-post-uri="${CSS.escape(uri)}"]`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      });
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    cleanup(() => window.removeEventListener('keydown', onKeyDown));
+  });
+
+  // Long-press on hide-seen FAB: restore seen posts (clear hidden set)
+  useVisibleTask$(({ track, cleanup: cleanupTask }) => {
+    track(() => seenPosts.value.size);
+    if (seenPosts.value.size === 0) return;
+    let longPressId: ReturnType<typeof setTimeout> | null = null;
+    let teardown: (() => void) | undefined;
+    const LONG_PRESS_MS = 600;
+    const setup = () => {
+      const el = document.getElementById('hide-seen-fab');
+      if (!el) return;
+      const onDown = () => {
+        longPressId = setTimeout(() => {
+          longPressId = null;
+          hiddenSeenUris.value = new Set();
+          app.toastMessage = 'Seen posts restored';
+          skipNextHideClick.value = true;
+        }, LONG_PRESS_MS);
+      };
+      const onUp = () => {
+        if (longPressId) {
+          clearTimeout(longPressId);
+          longPressId = null;
+        }
+      };
+      el.addEventListener('pointerdown', onDown);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
+      el.addEventListener('pointerleave', onUp);
+      teardown = () => {
+        if (longPressId) clearTimeout(longPressId);
+        el.removeEventListener('pointerdown', onDown);
+        el.removeEventListener('pointerup', onUp);
+        el.removeEventListener('pointercancel', onUp);
+        el.removeEventListener('pointerleave', onUp);
+      };
+    };
+    const timeoutId = setTimeout(setup, 0);
+    cleanupTask(() => {
+      clearTimeout(timeoutId);
+      teardown?.();
+    });
+  });
+
+  // Base list (sorted or raw); we filter by hiddenSeenUris for display
+  const baseItems =
     sortedDisplayItems.value.length > 0
       ? sortedDisplayItems.value
-      : feed.items.filter((item) => {
-          if (app.hideSeenPosts && seenPosts.value.has(item.post.uri)) return false;
-          return true;
-        });
+      : feed.items;
+  const displayItems = baseItems
+    .filter((item) => !hiddenSeenUris.value.has(item.post.uri))
+    .filter((item) => {
+      if (app.nsfwMode === 'hide' && bsky.isPostNsfw(item.post)) return false;
+      return true;
+    })
+    .filter((item) => {
+      if (!app.mediaOnly) return true;
+      return !!bsky.getPostMediaInfo(item.post);
+    });
 
   // ── Distribute into masonry columns ─────────────────────────────────────
   const numCols = app.viewColumns;
-  const columns: TimelineItem[][] = Array.from({ length: numCols }, () => []);
+  const columns: Array<Array<{ item: TimelineItem; originalIndex: number }>> = Array.from({ length: numCols }, () => []);
   displayItems.forEach((item, i) => {
-    columns[i % numCols].push(item);
+    columns[i % numCols].push({ item, originalIndex: i });
   });
 
   return (
@@ -322,51 +638,43 @@ export default component$(() => {
             <option value="newest">Newest</option>
             <option value="trending">Trending</option>
             <option value="wilson">Best</option>
+            <option value="score">Score</option>
             <option value="controversial">Controversial</option>
           </select>
+
         </div>
 
-        <div class="feed-controls-right">
-          {/* Hide seen toggle */}
-          <button
-            class={`icon-btn ${app.hideSeenPosts ? 'icon-btn-active' : ''}`}
-            onClick$={() => { app.hideSeenPosts = !app.hideSeenPosts; }}
-            aria-label={app.hideSeenPosts ? 'Show seen posts' : 'Hide seen posts'}
-            title={app.hideSeenPosts ? 'Show seen posts' : 'Hide seen posts'}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              {app.hideSeenPosts ? (
-                <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" /><path d="M1 1l22 22" /><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" /></>
-              ) : (
-                <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>
-              )}
-            </svg>
-          </button>
-
-          {/* Feed mixer button */}
-          {app.session.isLoggedIn && (
-            <button
-              class="btn-ghost feed-mix-btn"
-              onClick$={() => { showFeedSelector.value = !showFeedSelector.value; }}
-            >
-              Mix Feeds
-            </button>
-          )}
-
-          {/* Refresh */}
-          <button class="icon-btn" onClick$={() => loadFeed()} aria-label="Refresh feed">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-            </svg>
-          </button>
-        </div>
       </div>
 
-      {/* ── Feed Selector Panel ────────────────────────────────────────── */}
+      {/* ── Floating Feeds button (artsky-style): top center, opens feed selector ── */}
+      <div class="feeds-float-wrap">
+        <button
+          type="button"
+          class={`feeds-float-btn float-btn ${showFeedSelector.value ? 'feeds-float-btn-active' : ''}`}
+          onClick$={() => { showFeedSelector.value = !showFeedSelector.value; }}
+          aria-label="Feeds"
+          aria-expanded={showFeedSelector.value}
+          title="Mix feeds"
+        >
+          <span class="feeds-float-label">Feeds</span>
+          <span class="feeds-float-chevron" style={{ transform: showFeedSelector.value ? 'rotate(180deg)' : 'none' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        </button>
+        {showFeedSelector.value && (
+          <div class="feeds-float-dropdown">
+            <FeedSelector
+              onClose$={() => { showFeedSelector.value = false; }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ── Feed Selector Panel (when opened from floating button) ────────── */}
       {showFeedSelector.value && (
-        <FeedSelector
-          onClose$={() => { showFeedSelector.value = false; }}
-        />
+        <div class="feed-selector-backdrop" onClick$={() => { showFeedSelector.value = false; }} aria-hidden />
       )}
 
       {/* ── Error State ────────────────────────────────────────────────── */}
@@ -378,26 +686,77 @@ export default component$(() => {
       )}
 
       {/* ── Masonry Grid ───────────────────────────────────────────────── */}
-      <div class={`masonry-grid masonry-cols-${numCols}`}>
+      <div
+        class={`masonry-grid masonry-cols-${numCols}`}
+        data-keyboard-nav={keyboardNavActive.value || undefined}
+        onMouseMove$={() => { keyboardNavActive.value = false; }}
+        onMouseLeave$={() => { mouseOverIndex.value = -1; }}
+      >
         {columns.map((col, colIdx) => (
           <div key={colIdx} class="masonry-column">
-            {col.map((item) => (
-              <PostCard
+            {col.map(({ item, originalIndex }) => (
+              <div
                 key={item.post.uri}
-                item={item}
-                isSeen={seenPosts.value.has(item.post.uri)}
-                onSeen$={() => markSeen(item.post.uri)}
-                myDownvoteUri={app.session.isLoggedIn ? myDownvoteUris.value[item.post.uri] : undefined}
-                onDownvote$={app.session.isLoggedIn ? () => handleDownvote(item.post.uri, item.post.cid) : undefined}
-                onUndoDownvote$={app.session.isLoggedIn ? () => handleUndoDownvote(item.post.uri) : undefined}
-                artboards={app.session.isLoggedIn ? artboardsList.value : undefined}
-                onAddToArtboard$={app.session.isLoggedIn ? (boardId) => handleAddToArtboard(boardId, item) : undefined}
-                isInAnyArtboard={app.session.isLoggedIn ? inAnyArtboardUris.value.has(item.post.uri) : false}
-              />
+                onMouseEnter$={() => { mouseOverIndex.value = originalIndex; }}
+              >
+                <PostCard
+                  item={item}
+                  isSeen={seenPosts.value.has(item.post.uri)}
+                  onSeen$={() => markSeen(item.post.uri)}
+                  cardViewMode={app.cardViewMode}
+                  nsfwBlurred={app.nsfwMode === 'blur' && bsky.isPostNsfw(item.post) && !unblurredNsfwUris.value.has(item.post.uri)}
+                  onNsfwUnblur$={() => {
+                    const next = new Set(unblurredNsfwUris.value);
+                    next.add(item.post.uri);
+                    unblurredNsfwUris.value = next;
+                  }}
+                  downvoteCount={downvoteCounts.value[item.post.uri] ?? 0}
+                  myDownvoteUri={app.session.isLoggedIn ? myDownvoteUris.value[item.post.uri] : undefined}
+                  onDownvote$={app.session.isLoggedIn ? () => handleDownvote(item.post.uri, item.post.cid) : undefined}
+                  onUndoDownvote$={app.session.isLoggedIn ? () => handleUndoDownvote(item.post.uri) : undefined}
+                  artboards={app.session.isLoggedIn ? artboardsList.value : undefined}
+                  onAddToArtboard$={app.session.isLoggedIn ? (boardId) => handleAddToArtboard(boardId, item) : undefined}
+                  isInAnyArtboard={app.session.isLoggedIn ? inAnyArtboardUris.value.has(item.post.uri) : false}
+                  isSelected={keyboardNavActive.value && focusedIndex.value === originalIndex}
+                  isMouseOver={mouseOverIndex.value === originalIndex}
+                />
+              </div>
             ))}
           </div>
         ))}
       </div>
+
+      {/* ── Floating "Hide Seen" button: tap = hide seen, long-press = bring back ── */}
+      {seenPosts.value.size > 0 && (
+        <button
+          id="hide-seen-fab"
+          class="hide-seen-fab float-btn"
+          onClick$={() => {
+            if (skipNextHideClick.value) {
+              skipNextHideClick.value = false;
+              return;
+            }
+            const base = sortedDisplayItems.value.length > 0 ? sortedDisplayItems.value : feed.items;
+            const toHide = base.filter((item) => seenPosts.value.has(item.post.uri)).map((item) => item.post.uri);
+            const count = toHide.length;
+            hiddenSeenUris.value = new Set([...hiddenSeenUris.value, ...toHide]);
+            app.toastMessage =
+              count === 0
+                ? 'No seen posts in feed'
+                : count === 1
+                  ? '1 seen post hidden'
+                  : `${count} seen posts hidden`;
+          }}
+          aria-label="Hide seen posts (hold to restore)"
+          title="Hide seen posts (hold to restore)"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+            <path d="M1 1l22 22" />
+            <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+          </svg>
+        </button>
+      )}
 
       {/* ── Loading / Load More ────────────────────────────────────────── */}
       {feed.loading && (
@@ -415,11 +774,10 @@ export default component$(() => {
       {/* ── Empty State ────────────────────────────────────────────────── */}
       {!feed.loading && !feed.error && displayItems.length === 0 && (
         <div class="feed-empty flex-center">
-          <p>
-            {app.hideSeenPosts
-              ? 'All caught up! No new posts.'
-              : 'No posts to show. Try following some accounts.'}
-          </p>
+          <p>All caught up! No new posts.</p>
+          <button class="btn-ghost" style={{ marginTop: 'var(--space-md)' }} onClick$={() => loadFeed()}>
+            Refresh feed
+          </button>
         </div>
       )}
 

@@ -202,6 +202,9 @@ export type ThemeMode = 'light' | 'dark' | 'system' | 'high-contrast';
 
 export type ViewColumns = 1 | 2 | 3;
 
+/** Card preview style: full (text + meta + media), mini (compact), art (media focus) */
+export type CardViewMode = 'full' | 'mini' | 'art';
+
 // ── App State ─────────────────────────────────────────────────────────────
 
 export interface AppState {
@@ -226,6 +229,8 @@ export interface AppState {
   artOnly: boolean;
   /** Media-only filter */
   mediaOnly: boolean;
-  /** NSFW filter mode */
+  /** NSFW filter mode: hide = SFW only, blur = show blurred, show = NSFW visible */
   nsfwMode: 'hide' | 'blur' | 'show';
+  /** Card preview: full, mini, art */
+  cardViewMode: CardViewMode;
 }

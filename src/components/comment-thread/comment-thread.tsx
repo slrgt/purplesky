@@ -20,22 +20,53 @@
 
 import { component$, useSignal, $ } from '@builder.io/qwik';
 import type { ForumReply } from '~/lib/types';
+import { resizedAvatarUrl } from '~/lib/image-utils';
+import { ActionBar } from '~/components/action-buttons/action-buttons';
 
 const MAX_DEPTH = 5;
+
+export type CommentSortMode = 'newest' | 'oldest' | 'best' | 'controversial';
 
 interface CommentThreadProps {
   replies: ForumReply[];
   postUri: string;
   parentUri?: string;
   depth?: number;
+  /** Sort mode for sibling replies at each level */
+  sortOrder?: CommentSortMode;
+  /** Downvote counts per reply URI (for display and score-based sort) */
+  downvoteCounts?: Record<string, number>;
+  /** Map reply URI -> downvote record URI (for "I downvoted" state) */
+  myDownvoteUris?: Record<string, string>;
+  /** Called after user downvotes/undoes: (uri, action) so parent can refresh maps and counts */
+  onDownvoteChange$?: (uri: string, action: 'downvote' | 'undo') => void;
 }
 
 export const CommentThread = component$<CommentThreadProps>(
-  ({ replies, postUri, parentUri, depth = 0 }) => {
+  ({ replies, postUri, parentUri, depth = 0, sortOrder = 'best', downvoteCounts = {}, myDownvoteUris = {}, onDownvoteChange$ }) => {
     // Filter replies for this level
-    const levelReplies = replies.filter((r) => {
+    let levelReplies = replies.filter((r) => {
       if (depth === 0) return !r.replyTo;
       return r.replyTo === parentUri;
+    });
+
+    // Sort siblings by sortOrder (using downvoteCounts for score when best/controversial)
+    const getCreated = (r: ForumReply) => r.record?.createdAt ?? '';
+    const getScore = (r: ForumReply) => (r.likeCount ?? 0) - (downvoteCounts[r.uri] ?? 0);
+    const getControversy = (r: ForumReply) => {
+      const likes = r.likeCount ?? 0;
+      const downs = downvoteCounts[r.uri] ?? 0;
+      const total = likes + downs;
+      if (total === 0) return 0;
+      const ratio = likes / total;
+      return total * (1 - 2 * Math.abs(ratio - 0.5));
+    };
+    levelReplies = [...levelReplies].sort((a, b) => {
+      if (sortOrder === 'newest') return getCreated(b).localeCompare(getCreated(a));
+      if (sortOrder === 'oldest') return getCreated(a).localeCompare(getCreated(b));
+      if (sortOrder === 'best') return getScore(b) - getScore(a);
+      if (sortOrder === 'controversial') return getControversy(b) - getControversy(a);
+      return 0;
     });
 
     if (levelReplies.length === 0) return null;
@@ -49,6 +80,10 @@ export const CommentThread = component$<CommentThreadProps>(
             allReplies={replies}
             postUri={postUri}
             depth={depth}
+            sortOrder={sortOrder}
+            downvoteCounts={downvoteCounts}
+            myDownvoteUris={myDownvoteUris}
+            onDownvoteChange$={onDownvoteChange$}
           />
         ))}
       </div>
@@ -63,7 +98,11 @@ const CommentNode = component$<{
   allReplies: ForumReply[];
   postUri: string;
   depth: number;
-}>(({ reply, allReplies, postUri, depth }) => {
+  sortOrder?: CommentSortMode;
+  downvoteCounts?: Record<string, number>;
+  myDownvoteUris?: Record<string, string>;
+  onDownvoteChange$?: (uri: string, action: 'downvote' | 'undo') => void;
+}>(({ reply, allReplies, postUri, depth, sortOrder = 'best', downvoteCounts = {}, myDownvoteUris = {}, onDownvoteChange$ }) => {
   const collapsed = useSignal(false);
   const showReply = useSignal(false);
   const replyText = useSignal('');
@@ -104,7 +143,7 @@ const CommentNode = component$<{
         {/* Author row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
           {reply.author.avatar && (
-            <img src={reply.author.avatar} alt="" width="20" height="20" style={{ borderRadius: '50%' }} />
+            <img src={resizedAvatarUrl(reply.author.avatar, 20)} alt="" width="20" height="20" style={{ borderRadius: '50%' }} />
           )}
           <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>
             @{reply.author.handle}
@@ -127,19 +166,24 @@ const CommentNode = component$<{
           {reply.record?.text}
         </p>
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
-          <button style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', minWidth: 'auto', minHeight: 'auto' }}>
-            ♥ {reply.likeCount ?? 0}
-          </button>
-          {depth < MAX_DEPTH && (
-            <button
-              style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', minWidth: 'auto', minHeight: 'auto' }}
-              onClick$={() => { showReply.value = !showReply.value; }}
-            >
-              Reply
-            </button>
-          )}
+        {/* Actions: Like, Downvote, Reply (reusable ActionBar) */}
+        <div style={{ marginTop: 'var(--space-xs)' }}>
+          <ActionBar
+            subjectUri={reply.uri}
+            subjectCid={reply.cid}
+            likeCount={reply.likeCount ?? 0}
+            liked={!!reply.viewer?.like}
+            likeRecordUri={reply.viewer?.like}
+            downvoteCount={downvoteCounts[reply.uri] ?? 0}
+            downvoted={!!myDownvoteUris[reply.uri]}
+            downvoteRecordUri={myDownvoteUris[reply.uri]}
+            onDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'downvote'); }) : undefined}
+            onUndoDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'undo'); }) : undefined}
+            replyCount={childCount}
+            replyHref={depth >= MAX_DEPTH ? `/forum/${encodeURIComponent(postUri)}/` : undefined}
+            onReplyClick$={depth < MAX_DEPTH ? () => { showReply.value = !showReply.value; } : undefined}
+            compact
+          />
         </div>
 
         {/* Inline reply form */}
@@ -166,6 +210,10 @@ const CommentNode = component$<{
           postUri={postUri}
           parentUri={reply.uri}
           depth={depth + 1}
+          sortOrder={sortOrder}
+          downvoteCounts={downvoteCounts}
+          myDownvoteUris={myDownvoteUris}
+          onDownvoteChange$={onDownvoteChange$}
         />
       )}
     </div>

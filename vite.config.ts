@@ -33,10 +33,15 @@ export default defineConfig({
     alias: {
       '~': '/src',
     },
+    /* Ensure browser-compatible versions of packages are used.
+       Without this, jose (used by @atproto for JWT/OAuth) resolves to its
+       Node.js build which uses node:util.promisify – crashing in the browser. */
+    conditions: ['browser', 'import', 'module', 'default'],
   },
   /* Dev server settings */
   server: {
     port: 5173,
+    host: true, /* listen on 0.0.0.0 so 127.0.0.1 and localhost both work */
     headers: {
       'Cache-Control': 'no-store',
     },
@@ -53,5 +58,7 @@ export default defineConfig({
   /* Enable WASM in optimized deps */
   optimizeDeps: {
     exclude: ['purplesky-wasm'],
+    /* Force Vite to re-bundle these deps with browser conditions */
+    include: ['jose', '@atproto/oauth-client-browser'],
   },
 });

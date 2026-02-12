@@ -20,22 +20,34 @@
  */
 
 import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
-import { useLocation } from '@builder.io/qwik-city';
+import { useLocation, useNavigate } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
+import { ActionBar } from '~/components/action-buttons/action-buttons';
 import { CommentThread } from '~/components/comment-thread/comment-thread';
 import type { ForumPost, ForumReply } from '~/lib/types';
 
 export default component$(() => {
   const app = useAppState();
   const loc = useLocation();
+  const nav = useNavigate();
   const postUri = decodeURIComponent(loc.params.id);
 
   const post = useSignal<ForumPost | null>(null);
   const replies = useSignal<ForumReply[]>([]);
   const loading = useSignal(true);
   const replyText = useSignal('');
+  const editing = useSignal(false);
+  const editTitle = useSignal('');
+  const editBody = useSignal('');
+  const confirmDelete = useSignal(false);
+  /** Map reply/post URI -> downvote record URI (for comments and main post) */
+  const myDownvoteUris = useSignal<Record<string, string>>({});
+  /** Downvote counts per reply/post URI (for sort and display) */
+  const replyDownvoteCounts = useSignal<Record<string, number>>({});
+  /** Comment sort mode */
+  const commentSortMode = useSignal<'newest' | 'oldest' | 'best' | 'controversial'>('best');
 
-  // Load post and replies
+  // Load post, replies, my downvotes, and downvote counts
   useVisibleTask$(async () => {
     try {
       const { getForumPost, listForumReplies } = await import('~/lib/forum');
@@ -45,6 +57,16 @@ export default component$(() => {
       ]);
       post.value = p;
       replies.value = r;
+      if (app.session.did) {
+        const { listMyDownvotes } = await import('~/lib/bsky');
+        myDownvoteUris.value = await listMyDownvotes();
+      }
+      const uris: string[] = p?.uri ? [p.uri] : [];
+      r.forEach((reply) => uris.push(reply.uri));
+      if (uris.length > 0) {
+        const { getDownvoteCounts } = await import('~/lib/constellation');
+        replyDownvoteCounts.value = await getDownvoteCounts(uris);
+      }
     } catch (err) {
       console.error('Failed to load post:', err);
     }
@@ -69,11 +91,49 @@ export default component$(() => {
     try {
       const { promoteToWiki } = await import('~/lib/forum');
       await promoteToWiki(postUri);
-      // Reload
       const { getForumPost } = await import('~/lib/forum');
       post.value = await getForumPost(postUri);
     } catch (err) {
       console.error('Failed to promote:', err);
+    }
+  });
+
+  // Start editing
+  const startEdit = $(() => {
+    if (!post.value) return;
+    editTitle.value = post.value.title ?? '';
+    editBody.value = post.value.body ?? '';
+    editing.value = true;
+  });
+
+  // Save edit
+  const saveEdit = $(async () => {
+    if (!post.value) return;
+    try {
+      const { editForumPost, getForumPost } = await import('~/lib/forum');
+      await editForumPost(postUri, {
+        title: editTitle.value,
+        body: editBody.value,
+      });
+      post.value = await getForumPost(postUri);
+      editing.value = false;
+    } catch (err) {
+      console.error('Failed to save edit:', err);
+    }
+  });
+
+  // Delete post
+  const handleDelete = $(async () => {
+    if (!confirmDelete.value) {
+      confirmDelete.value = true;
+      return;
+    }
+    try {
+      const { deleteForumPost } = await import('~/lib/forum');
+      await deleteForumPost(postUri);
+      nav('/forum/');
+    } catch (err) {
+      console.error('Failed to delete:', err);
     }
   });
 
@@ -113,13 +173,35 @@ export default component$(() => {
           {p.createdAt && <span>{new Date(p.createdAt).toLocaleDateString()}</span>}
         </div>
 
-        {/* Post body */}
-        <div style={{ lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {p.body}
-        </div>
+        {/* Post body (edit mode or display) */}
+        {editing.value ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+            <input
+              type="text"
+              value={editTitle.value}
+              onInput$={(_, el) => { editTitle.value = el.value; }}
+              style={{ fontSize: 'var(--font-lg)', fontWeight: '700', padding: 'var(--space-sm)' }}
+              placeholder="Title"
+            />
+            <textarea
+              value={editBody.value}
+              onInput$={(_, el) => { editBody.value = el.value; }}
+              style={{ minHeight: '200px', resize: 'vertical', lineHeight: '1.7', padding: 'var(--space-sm)' }}
+              placeholder="Post body..."
+            />
+            <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+              <button class="btn" onClick$={saveEdit}>Save</button>
+              <button class="btn-ghost" onClick$={() => { editing.value = false; confirmDelete.value = false; }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {p.body}
+          </div>
+        )}
 
         {/* Tags */}
-        {p.tags && p.tags.length > 0 && (
+        {!editing.value && p.tags && p.tags.length > 0 && (
           <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: 'var(--space-lg)', flexWrap: 'wrap' }}>
             {p.tags.map((tag) => (
               <span key={tag} class="badge">#{tag}</span>
@@ -127,16 +209,49 @@ export default component$(() => {
           </div>
         )}
 
+        {/* Like, Downvote, Reply */}
+        {!editing.value && (
+          <div style={{ marginTop: 'var(--space-lg)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-md)' }}>
+            <ActionBar
+              subjectUri={p.uri}
+              subjectCid={p.cid}
+              likeCount={p.likeCount ?? 0}
+              liked={false}
+              downvoteCount={replyDownvoteCounts.value[p.uri] ?? 0}
+              downvoted={!!myDownvoteUris.value[p.uri]}
+              downvoteRecordUri={myDownvoteUris.value[p.uri]}
+              onDownvote$={app.session.isLoggedIn ? $(async () => {
+                const { listMyDownvotes } = await import('~/lib/bsky');
+                myDownvoteUris.value = await listMyDownvotes();
+                replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [p.uri]: (replyDownvoteCounts.value[p.uri] ?? 0) + 1 };
+              }) : undefined}
+              onUndoDownvote$={app.session.isLoggedIn ? $(async () => {
+                const { listMyDownvotes } = await import('~/lib/bsky');
+                myDownvoteUris.value = await listMyDownvotes();
+                replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [p.uri]: Math.max(0, (replyDownvoteCounts.value[p.uri] ?? 0) - 1) };
+              }) : undefined}
+              replyCount={p.replyCount ?? replies.value.length}
+              replyHref={`/forum/${encodeURIComponent(postUri)}/`}
+            />
+          </div>
+        )}
+
         {/* Author actions */}
-        {isAuthor && (
+        {isAuthor && !editing.value && (
           <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-lg)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-md)' }}>
-            <button class="btn-ghost" style={{ fontSize: 'var(--font-sm)' }}>Edit</button>
+            <button class="btn-ghost" style={{ fontSize: 'var(--font-sm)' }} onClick$={startEdit}>Edit</button>
             {!p.isWiki && (
               <button class="btn-ghost" style={{ fontSize: 'var(--font-sm)' }} onClick$={handlePromoteWiki}>
                 Promote to Wiki
               </button>
             )}
-            <button class="btn-ghost" style={{ fontSize: 'var(--font-sm)', color: 'var(--danger)' }}>Delete</button>
+            <button
+              class="btn-ghost"
+              style={{ fontSize: 'var(--font-sm)', color: 'var(--danger)' }}
+              onClick$={handleDelete}
+            >
+              {confirmDelete.value ? 'Confirm Delete?' : 'Delete'}
+            </button>
           </div>
         )}
       </article>
@@ -162,8 +277,35 @@ export default component$(() => {
           </div>
         )}
 
-        {/* Threaded replies */}
-        <CommentThread replies={replies.value} postUri={postUri} />
+        {/* Sort + threaded replies */}
+        {replies.value.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+            <span style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)' }}>Sort:</span>
+            <select
+              value={commentSortMode.value}
+              onChange$={(_, el) => { commentSortMode.value = el.value as typeof commentSortMode.value; }}
+              style={{ fontSize: 'var(--font-sm)', padding: 'var(--space-xs) var(--space-sm)', borderRadius: 'var(--glass-radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="best">Best</option>
+              <option value="controversial">Controversial</option>
+            </select>
+          </div>
+        )}
+        <CommentThread
+          replies={replies.value}
+          postUri={postUri}
+          sortOrder={commentSortMode.value}
+          downvoteCounts={replyDownvoteCounts.value}
+          myDownvoteUris={myDownvoteUris.value}
+          onDownvoteChange$={app.session.isLoggedIn ? $(async (uri: string, action: 'downvote' | 'undo') => {
+            const { listMyDownvotes } = await import('~/lib/bsky');
+            myDownvoteUris.value = await listMyDownvotes();
+            const delta = action === 'downvote' ? 1 : -1;
+            replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [uri]: Math.max(0, (replyDownvoteCounts.value[uri] ?? 0) + delta) };
+          }) : undefined}
+        />
       </div>
     </div>
   );

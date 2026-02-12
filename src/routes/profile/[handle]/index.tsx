@@ -17,9 +17,11 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
+import { component$, useSignal, useVisibleTask$, useStore, $ } from '@builder.io/qwik';
 import { useLocation } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
+import { ActionBar } from '~/components/action-buttons/action-buttons';
+import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { ProfileView, TimelineItem } from '~/lib/types';
 
 const TABS = ['Posts', 'Media', 'Forums', 'Activity'];
@@ -32,8 +34,10 @@ export default component$(() => {
   const profile = useSignal<ProfileView | null>(null);
   const posts = useSignal<TimelineItem[]>([]);
   const forumPosts = useSignal<Array<{ uri: string; title?: string; createdAt?: string }>>([]);
+  const notifications = useSignal<Array<{ uri: string; reason: string; author?: { handle?: string; displayName?: string; avatar?: string }; indexedAt?: string; isRead?: boolean }>>([]);
   const loading = useSignal(true);
   const activeTab = useSignal('Posts');
+  const followLoading = useSignal(false);
 
   useVisibleTask$(async () => {
     try {
@@ -52,14 +56,46 @@ export default component$(() => {
   useVisibleTask$(async ({ track }) => {
     track(() => activeTab.value);
     track(() => profile.value?.did);
-    if (activeTab.value !== 'Forums' || !profile.value?.did) return;
-    try {
-      const { listForumPosts } = await import('~/lib/forum');
-      const result = await listForumPosts(profile.value.did, { limit: 30 });
-      forumPosts.value = result.posts.map((fp) => ({ uri: fp.uri, title: fp.title, createdAt: fp.createdAt }));
-    } catch {
-      forumPosts.value = [];
+    if (!profile.value?.did) return;
+
+    if (activeTab.value === 'Forums') {
+      try {
+        const { listForumPosts } = await import('~/lib/forum');
+        const result = await listForumPosts(profile.value.did, { limit: 30 });
+        forumPosts.value = result.posts.map((fp) => ({ uri: fp.uri, title: fp.title, createdAt: fp.createdAt }));
+      } catch {
+        forumPosts.value = [];
+      }
     }
+
+    if (activeTab.value === 'Activity' && app.session.did === profile.value.did) {
+      try {
+        const { getNotifications } = await import('~/lib/bsky');
+        const result = await getNotifications(30);
+        notifications.value = result.notifications as typeof notifications.value;
+      } catch {
+        notifications.value = [];
+      }
+    }
+  });
+
+  const handleFollow = $(async () => {
+    if (!profile.value || followLoading.value) return;
+    followLoading.value = true;
+    try {
+      if (profile.value.viewer?.following) {
+        const { unfollowUser } = await import('~/lib/bsky');
+        await unfollowUser(profile.value.viewer.following);
+        profile.value = { ...profile.value, viewer: { ...profile.value.viewer, following: undefined } };
+      } else {
+        const { followUser } = await import('~/lib/bsky');
+        const followUri = await followUser(profile.value.did);
+        profile.value = { ...profile.value, viewer: { ...profile.value.viewer, following: followUri } };
+      }
+    } catch (err) {
+      console.error('Follow action failed:', err);
+    }
+    followLoading.value = false;
   });
 
   if (loading.value) {
@@ -96,8 +132,12 @@ export default component$(() => {
             </div>
           </div>
           {!isMe && app.session.isLoggedIn && (
-            <button class={p.viewer?.following ? 'btn-ghost' : 'btn'}>
-              {p.viewer?.following ? 'Following' : 'Follow'}
+            <button
+              class={p.viewer?.following ? 'btn-ghost' : 'btn'}
+              onClick$={handleFollow}
+              disabled={followLoading.value}
+            >
+              {followLoading.value ? '…' : p.viewer?.following ? 'Following' : 'Follow'}
             </button>
           )}
         </div>
@@ -126,14 +166,24 @@ export default component$(() => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
           {posts.value.map((item) => {
             const rec = item.post.record as { text?: string; createdAt?: string };
+            const postPath = `/post/${encodeURIComponent(item.post.uri)}/`;
             return (
               <div key={item.post.uri} class="glass" style={{ padding: 'var(--space-md)' }}>
                 {rec?.text && <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5' }}>{rec.text}</p>}
                 <div style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', marginTop: 'var(--space-xs)' }}>
                   {rec?.createdAt && new Date(rec.createdAt).toLocaleDateString()}
-                  {' · '}
-                  {item.post.likeCount ?? 0} likes · {item.post.replyCount ?? 0} replies
                 </div>
+                <ActionBar
+                  subjectUri={item.post.uri}
+                  subjectCid={item.post.cid}
+                  likeCount={item.post.likeCount ?? 0}
+                  liked={!!item.post.viewer?.like}
+                  likeRecordUri={item.post.viewer?.like}
+                  downvoteCount={0}
+                  replyCount={item.post.replyCount ?? 0}
+                  replyHref={postPath}
+                  compact
+                />
               </div>
             );
           })}
@@ -186,14 +236,41 @@ export default component$(() => {
 
       {/* Activity tab: notifications for own profile, else message */}
       {activeTab.value === 'Activity' && (
-        <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--muted)' }}>
+        <div>
           {isMe ? (
-            <>
-              <p style={{ marginBottom: 'var(--space-md)' }}>Your recent likes, replies, and mentions.</p>
-              <a href="/" class="btn">View feed</a>
-            </>
+            notifications.value.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                {notifications.value.map((n) => {
+                  const reasonLabel: Record<string, string> = {
+                    like: 'liked your post', reply: 'replied to you', follow: 'followed you',
+                    repost: 'reposted your post', mention: 'mentioned you', quote: 'quoted your post',
+                  };
+                  const author = n.author as { handle?: string; displayName?: string; avatar?: string } | undefined;
+                  return (
+                    <div key={n.uri} class="glass" style={{ padding: 'var(--space-sm) var(--space-md)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', opacity: n.isRead ? 0.7 : 1 }}>
+                      {author?.avatar && <img src={resizedAvatarUrl(author.avatar, 24)} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: '600', fontSize: 'var(--font-sm)' }}>
+                          {author?.displayName || author?.handle || 'Someone'}
+                        </span>{' '}
+                        <span style={{ color: 'var(--muted)', fontSize: 'var(--font-sm)' }}>
+                          {reasonLabel[n.reason as string] ?? n.reason}
+                        </span>
+                      </div>
+                      {n.indexedAt && (
+                        <span style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', flexShrink: 0 }}>
+                          {new Date(n.indexedAt).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 'var(--space-xl)' }}>No recent activity.</p>
+            )
           ) : (
-            <p>Activity is only visible to the account owner.</p>
+            <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 'var(--space-2xl)' }}>Activity is only visible to the account owner.</p>
           )}
         </div>
       )}

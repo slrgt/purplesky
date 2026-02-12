@@ -148,14 +148,115 @@ self.addEventListener('sync', (event) => {
   }
 });
 
+// ── IndexedDB Helpers ────────────────────────────────────────────────────
+const IDB_NAME = 'purplesky-offline';
+const IDB_VERSION = 1;
+const POSTS_STORE = 'pending-posts';
+const VOTES_STORE = 'pending-votes';
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(POSTS_STORE)) {
+        db.createObjectStore(POSTS_STORE, { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(VOTES_STORE)) {
+        db.createObjectStore(VOTES_STORE, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function getAllFromStore(db, storeName) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteFromStore(db, storeName, key) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const req = store.delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ── Offline Sync Implementation ─────────────────────────────────────────
+
 async function syncOfflinePosts() {
-  // Read pending posts from IndexedDB and send them
-  // This is a placeholder – implement with your offline queue
   console.log('[SW] Syncing offline posts...');
+  try {
+    const db = await openDb();
+    const pendingPosts = await getAllFromStore(db, POSTS_STORE);
+    if (pendingPosts.length === 0) return;
+    console.log(`[SW] Found ${pendingPosts.length} pending posts`);
+
+    for (const post of pendingPosts) {
+      try {
+        const res = await fetch(post.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(post.authHeader ? { Authorization: post.authHeader } : {}),
+          },
+          body: JSON.stringify(post.body),
+        });
+        if (res.ok) {
+          await deleteFromStore(db, POSTS_STORE, post.id);
+          console.log(`[SW] Synced post ${post.id}`);
+        } else {
+          console.warn(`[SW] Failed to sync post ${post.id}: ${res.status}`);
+        }
+      } catch (err) {
+        console.warn(`[SW] Network error syncing post ${post.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[SW] syncOfflinePosts error:', err);
+  }
 }
 
 async function syncOfflineVotes() {
   console.log('[SW] Syncing offline votes...');
+  try {
+    const db = await openDb();
+    const pendingVotes = await getAllFromStore(db, VOTES_STORE);
+    if (pendingVotes.length === 0) return;
+    console.log(`[SW] Found ${pendingVotes.length} pending votes`);
+
+    for (const vote of pendingVotes) {
+      try {
+        const res = await fetch(vote.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(vote.authHeader ? { Authorization: vote.authHeader } : {}),
+          },
+          body: JSON.stringify(vote.body),
+        });
+        if (res.ok) {
+          await deleteFromStore(db, VOTES_STORE, vote.id);
+          console.log(`[SW] Synced vote ${vote.id}`);
+        } else {
+          console.warn(`[SW] Failed to sync vote ${vote.id}: ${res.status}`);
+        }
+      } catch (err) {
+        console.warn(`[SW] Network error syncing vote ${vote.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[SW] syncOfflineVotes error:', err);
+  }
 }
 
 // ── Push Notifications (for mentions, replies) ────────────────────────────

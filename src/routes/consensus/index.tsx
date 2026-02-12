@@ -29,21 +29,90 @@ import { component$, useSignal, useStore, useVisibleTask$, $ } from '@builder.io
 import { useAppState } from '~/context/app-context';
 import type { ConsensusResult } from '~/lib/types';
 
+const STATEMENT_COLLECTION = 'app.purplesky.forum.post';
+const VOTE_COLLECTION = 'app.purplesky.consensus.vote';
+
 export default component$(() => {
   const app = useAppState();
 
-  // Example statements for demo
-  const statements = useStore<Array<{ id: string; text: string; myVote: -1 | 0 | 1 | null }>>([
-    { id: '1', text: 'Forums should support markdown formatting', myVote: null },
-    { id: '2', text: 'Real-time collaboration features are more important than async tools', myVote: null },
-    { id: '3', text: 'The app should prioritize mobile experience over desktop', myVote: null },
-    { id: '4', text: 'Blender and Godot workflows should have dedicated UI sections', myVote: null },
-    { id: '5', text: 'AI-powered content moderation would improve the community', myVote: null },
-  ]);
-
+  const statements = useStore<Array<{ id: string; uri: string; text: string; myVote: -1 | 0 | 1 | null; authorHandle?: string }>>([]);
   const newStatement = useSignal('');
   const result = useSignal<ConsensusResult | null>(null);
   const analyzing = useSignal(false);
+  const loadingStatements = useSignal(true);
+
+  // Load statements and votes from PDS on mount
+  useVisibleTask$(async () => {
+    try {
+      const { agent, publicAgent, getSession } = await import('~/lib/bsky');
+      const session = getSession();
+      const client = session ? agent : publicAgent;
+
+      // Load statements tagged with "consensus" from known DIDs
+      // For now, load from the logged-in user's repo + any community repos
+      const didsToCheck: string[] = [];
+      if (session?.did) didsToCheck.push(session.did);
+
+      const loaded: typeof statements = [];
+      const seenUris = new Set<string>();
+
+      for (const did of didsToCheck) {
+        try {
+          const res = await client.com.atproto.repo.listRecords({
+            repo: did, collection: STATEMENT_COLLECTION, limit: 100,
+          });
+          for (const r of res.data.records ?? []) {
+            if (seenUris.has(r.uri)) continue;
+            const v = r.value as { title?: string; body?: string; tags?: string[] };
+            // Only include posts tagged "consensus"
+            if (!v.tags?.includes('consensus')) continue;
+            seenUris.add(r.uri);
+            loaded.push({
+              id: r.uri.split('/').pop() ?? r.uri,
+              uri: r.uri,
+              text: v.title || v.body || '',
+              myVote: null,
+            });
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Load existing votes
+      if (session?.did) {
+        try {
+          const voteRes = await client.com.atproto.repo.listRecords({
+            repo: session.did, collection: VOTE_COLLECTION, limit: 100,
+          });
+          for (const r of voteRes.data.records ?? []) {
+            const v = r.value as { statement?: string; value?: number };
+            if (v.statement) {
+              const stmt = loaded.find((s) => s.uri === v.statement);
+              if (stmt) stmt.myVote = (v.value ?? null) as -1 | 0 | 1 | null;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      // If no consensus statements exist yet, seed with examples so the page isn't empty
+      if (loaded.length === 0) {
+        const examples = [
+          'Forums should support markdown formatting',
+          'Real-time collaboration features are more important than async tools',
+          'The app should prioritize mobile experience over desktop',
+          'Blender and Godot workflows should have dedicated UI sections',
+          'AI-powered content moderation would improve the community',
+        ];
+        examples.forEach((text, i) => {
+          loaded.push({ id: `seed-${i}`, uri: '', text, myVote: null });
+        });
+      }
+
+      statements.splice(0, statements.length, ...loaded);
+    } catch (err) {
+      console.error('Failed to load consensus data:', err);
+    }
+    loadingStatements.value = false;
+  });
 
   // Analyze consensus whenever votes change
   const analyze = $(async () => {
@@ -67,19 +136,77 @@ export default component$(() => {
     analyzing.value = false;
   });
 
-  const vote = $((statementId: string, value: -1 | 0 | 1) => {
+  const vote = $(async (statementId: string, value: -1 | 0 | 1) => {
     const stmt = statements.find((s) => s.id === statementId);
-    if (stmt) {
-      stmt.myVote = stmt.myVote === value ? null : value;
-      analyze();
+    if (!stmt) return;
+
+    const newVote = stmt.myVote === value ? null : value;
+    stmt.myVote = newVote;
+
+    // Persist vote to PDS
+    if (stmt.uri) {
+      try {
+        const { agent, getSession } = await import('~/lib/bsky');
+        const session = getSession();
+        if (session?.did) {
+          const rkey = `vote-${stmt.id.replace(/[^a-zA-Z0-9-]/g, '')}`;
+          if (newVote !== null) {
+            await agent.com.atproto.repo.putRecord({
+              repo: session.did, collection: VOTE_COLLECTION, rkey,
+              record: {
+                $type: VOTE_COLLECTION,
+                statement: stmt.uri,
+                value: newVote,
+                createdAt: new Date().toISOString(),
+              },
+              validate: false,
+            });
+          } else {
+            try {
+              await agent.com.atproto.repo.deleteRecord({
+                repo: session.did, collection: VOTE_COLLECTION, rkey,
+              });
+            } catch { /* may not exist */ }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to persist vote:', err);
+      }
     }
+
+    analyze();
   });
 
-  const addStatement = $(() => {
+  const addStatement = $(async () => {
     if (!newStatement.value.trim()) return;
+    const text = newStatement.value.trim();
+
+    // Persist to PDS as a forum post tagged "consensus"
+    let uri = '';
+    try {
+      const { agent, getSession } = await import('~/lib/bsky');
+      const session = getSession();
+      if (session?.did) {
+        const rkey = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const res = await agent.com.atproto.repo.putRecord({
+          repo: session.did, collection: STATEMENT_COLLECTION, rkey,
+          record: {
+            $type: STATEMENT_COLLECTION,
+            title: text, body: text, tags: ['consensus'],
+            createdAt: new Date().toISOString(),
+          },
+          validate: false,
+        });
+        uri = res.data.uri;
+      }
+    } catch (err) {
+      console.error('Failed to persist statement:', err);
+    }
+
     statements.push({
-      id: `${Date.now()}`,
-      text: newStatement.value.trim(),
+      id: uri ? uri.split('/').pop()! : `${Date.now()}`,
+      uri,
+      text,
       myVote: null,
     });
     newStatement.value = '';
@@ -98,6 +225,10 @@ export default component$(() => {
       <p style={{ color: 'var(--muted)', marginBottom: 'var(--space-xl)' }}>
         Vote on statements to find where the community agrees. Powered by WASM consensus analysis.
       </p>
+
+      {loadingStatements.value && (
+        <div class="flex-center" style={{ padding: 'var(--space-2xl)' }}><div class="spinner" /></div>
+      )}
 
       {/* Statement Cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', marginBottom: 'var(--space-xl)' }}>

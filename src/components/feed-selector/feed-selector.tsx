@@ -4,44 +4,48 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * Lets users mix multiple Bluesky feeds with percentage weights.
- * Example: 60% Following + 40% Art feed.
- *
- * HOW TO EDIT:
- *  - To add preset feed configs, add entries to the PRESET_FEEDS array
- *  - To change the percentage slider range, edit the input range attributes
- *  - Feed URIs are at:// URIs from Bluesky feed generators
+ * Includes Following (timeline), Add from saved, Manage saved feeds (edit list
+ * on PDS), and Discover feeds.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { component$, useVisibleTask$, useSignal, type QRL } from '@builder.io/qwik';
+import { component$, useVisibleTask$, useSignal, $, type QRL } from '@builder.io/qwik';
 import { useAppState } from '~/context/app-context';
-import type { FeedMixEntry, FeedSource } from '~/lib/types';
+import type { SavedFeedItem } from '~/lib/bsky';
 
 interface FeedSelectorProps {
   onClose$: QRL<() => void>;
 }
 
+function savedFeedLabel(f: SavedFeedItem): string {
+  if (f.type === 'timeline') return 'Following';
+  return f.value.split('/').pop() ?? f.value;
+}
+
 export const FeedSelector = component$<FeedSelectorProps>(({ onClose$ }) => {
   const app = useAppState();
-  const savedFeeds = useSignal<Array<{ id: string; label: string; uri: string }>>([]);
-  const newFeedUrl = useSignal('');
+  const savedFeeds = useSignal<SavedFeedItem[]>([]);
+  const showManage = useSignal(false);
+  const suggestedFeeds = useSignal<Array<{ uri: string; displayName?: string; description?: string }>>([]);
+  const loadingSuggested = useSignal(false);
+  const manageError = useSignal('');
 
-  // Load saved feeds from Bluesky preferences
-  useVisibleTask$(async () => {
+  const refreshSavedFeeds = $(async () => {
     try {
       const { getSavedFeeds } = await import('~/lib/bsky');
-      const feeds = await getSavedFeeds();
-      savedFeeds.value = feeds
-        .filter((f) => f.type === 'feed')
-        .map((f) => ({ id: f.id, label: f.value.split('/').pop() ?? f.value, uri: f.value }));
+      savedFeeds.value = await getSavedFeeds();
     } catch { /* ignore */ }
   });
 
+  useVisibleTask$(async () => {
+    await refreshSavedFeeds();
+  });
+
   return (
-    <div class="feed-selector glass-strong">
-      <div class="flex-between" style={{ marginBottom: 'var(--space-md)' }}>
-        <h3 style={{ fontSize: 'var(--font-lg)', fontWeight: '700' }}>Mix Feeds</h3>
-        <button class="icon-btn" onClick$={onClose$} aria-label="Close">✕</button>
+    <div class="feed-selector">
+      <div class="flex-between feed-selector-header">
+        <h3 class="feed-selector-title">Mix Feeds</h3>
+        <button class="icon-btn feed-selector-close" onClick$={onClose$} aria-label="Close">✕</button>
       </div>
 
       {/* Current mix entries */}
@@ -55,15 +59,15 @@ export const FeedSelector = component$<FeedSelectorProps>(({ onClose$ }) => {
             value={entry.percent}
             class="feed-mix-slider"
             onInput$={(_, el) => {
+              const pct = Math.min(100, Math.max(0, parseInt(el.value, 10) || 0));
               app.feedMix = app.feedMix.map((e, j) =>
-                j === i ? { ...e, percent: parseInt(el.value) } : e,
+                j === i ? { ...e, percent: pct } : e,
               );
             }}
           />
           <span class="feed-mix-pct">{entry.percent}%</span>
           <button
-            class="icon-btn"
-            style={{ width: '28px', height: '28px', minWidth: '28px', minHeight: '28px', fontSize: 'var(--font-sm)' }}
+            class="icon-btn feed-mix-remove"
             onClick$={() => {
               app.feedMix = app.feedMix.filter((_, j) => j !== i);
             }}
@@ -74,38 +78,138 @@ export const FeedSelector = component$<FeedSelectorProps>(({ onClose$ }) => {
         </div>
       ))}
 
-      {/* Add saved feed */}
-      {savedFeeds.value.length > 0 && (
-        <div style={{ marginTop: 'var(--space-md)' }}>
-          <p style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', marginBottom: 'var(--space-sm)' }}>
-            Add from your saved feeds:
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-            {savedFeeds.value
-              .filter((f) => !app.feedMix.some((m) => m.source.uri === f.uri))
-              .map((f) => (
-                <button
-                  key={f.id}
-                  class="btn-ghost"
-                  style={{ fontSize: 'var(--font-xs)', padding: '4px 8px' }}
-                  onClick$={() => {
-                    app.feedMix = [
-                      ...app.feedMix,
-                      { source: { kind: 'custom', label: f.label, uri: f.uri }, percent: 20 },
-                    ];
-                  }}
-                >
-                  + {f.label}
-                </button>
-              ))}
-          </div>
+      {/* Add from saved: Following + saved feeds not already in mix */}
+      <div class="feed-selector-add">
+        <p class="feed-selector-add-label">Add from saved:</p>
+        <div class="feed-selector-add-btns">
+          {!app.feedMix.some((m) => m.source.kind === 'timeline') && (
+            <button
+              class="btn-ghost feed-selector-add-btn"
+              onClick$={() => {
+                app.feedMix = [
+                  ...app.feedMix,
+                  { source: { kind: 'timeline', label: 'Following' }, percent: 20 },
+                ];
+              }}
+            >
+              + Following
+            </button>
+          )}
+          {savedFeeds.value
+            .filter((f) => f.type === 'feed' && !app.feedMix.some((m) => m.source.uri === f.value))
+            .map((f) => (
+              <button
+                key={f.id}
+                class="btn-ghost feed-selector-add-btn"
+                onClick$={() => {
+                  app.feedMix = [
+                    ...app.feedMix,
+                    { source: { kind: 'custom', label: savedFeedLabel(f), uri: f.value }, percent: 20 },
+                  ];
+                }}
+              >
+                + {savedFeedLabel(f)}
+              </button>
+            ))}
         </div>
-      )}
+      </div>
+
+      {/* Manage saved feeds (edit list on PDS) */}
+      <div class="feed-selector-manage">
+        <button
+          type="button"
+          class="btn-ghost feed-selector-manage-btn"
+          onClick$={() => {
+            showManage.value = !showManage.value;
+            manageError.value = '';
+            if (showManage.value) suggestedFeeds.value = [];
+          }}
+        >
+          {showManage.value ? 'Done' : 'Edit saved feeds'}
+        </button>
+        {showManage.value && (
+          <div class="feed-selector-manage-panel">
+            {manageError.value && <p class="feed-selector-error">{manageError.value}</p>}
+            <p class="feed-selector-add-label">Saved on your account (remove to delete from list):</p>
+            <ul class="feed-selector-saved-list">
+              {savedFeeds.value.map((f) => (
+                <li key={f.id} class="feed-selector-saved-item">
+                  <span class="feed-selector-saved-label">{savedFeedLabel(f)}</span>
+                  {f.type === 'timeline' ? (
+                    <span class="feed-selector-saved-note">(built-in)</span>
+                  ) : (
+                    <button
+                      type="button"
+                      class="btn-ghost feed-selector-remove-saved"
+                      onClick$={$(async () => {
+                        try {
+                          const { removeSavedFeeds } = await import('~/lib/bsky');
+                          await removeSavedFeeds([f.id]);
+                          await refreshSavedFeeds();
+                        } catch (e) {
+                          manageError.value = e instanceof Error ? e.message : 'Failed to remove';
+                        }
+                      })}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p class="feed-selector-add-label" style={{ marginTop: 'var(--space-sm)' }}>Discover feeds (add to your saved list):</p>
+            {suggestedFeeds.value.length === 0 && !loadingSuggested.value && (
+              <button
+                type="button"
+                class="btn-ghost feed-selector-add-btn"
+                onClick$={$(async () => {
+                  loadingSuggested.value = true;
+                  manageError.value = '';
+                  try {
+                    const { getSuggestedFeeds } = await import('~/lib/bsky');
+                    const { feeds } = await getSuggestedFeeds(20);
+                    suggestedFeeds.value = feeds;
+                  } catch (e) {
+                    manageError.value = e instanceof Error ? e.message : 'Failed to load suggestions';
+                  }
+                  loadingSuggested.value = false;
+                })}
+              >
+                Load suggested feeds
+              </button>
+            )}
+            {loadingSuggested.value && <span class="feed-selector-muted">Loading…</span>}
+            <ul class="feed-selector-suggested-list">
+              {suggestedFeeds.value
+                .filter((s) => !savedFeeds.value.some((f) => f.type === 'feed' && f.value === s.uri))
+                .map((s) => (
+                  <li key={s.uri} class="feed-selector-suggested-item">
+                    <span class="feed-selector-saved-label">{s.displayName || s.uri.split('/').pop() || s.uri}</span>
+                    <button
+                      type="button"
+                      class="btn-ghost feed-selector-add-btn"
+                      onClick$={$(async () => {
+                        try {
+                          const { addSavedFeeds } = await import('~/lib/bsky');
+                          await addSavedFeeds([{ type: 'feed', value: s.uri }]);
+                          await refreshSavedFeeds();
+                        } catch (e) {
+                          manageError.value = e instanceof Error ? e.message : 'Failed to add';
+                        }
+                      })}
+                    >
+                      Save
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+      </div>
 
       {/* Balance button */}
       <button
-        class="btn"
-        style={{ marginTop: 'var(--space-md)', width: '100%', justifyContent: 'center' }}
+        class="btn feed-selector-balance"
         onClick$={() => {
           if (app.feedMix.length === 0) return;
           const each = Math.floor(100 / app.feedMix.length);
@@ -116,11 +220,33 @@ export const FeedSelector = component$<FeedSelectorProps>(({ onClose$ }) => {
       </button>
 
       <style>{`
-        .feed-selector { padding: var(--space-lg); margin-bottom: var(--space-md); }
-        .feed-mix-entry { display: flex; align-items: center; gap: var(--space-sm); margin-bottom: var(--space-sm); }
-        .feed-mix-label { flex: 0 0 100px; font-size: var(--font-sm); font-weight: 600; }
-        .feed-mix-slider { flex: 1; accent-color: var(--accent); }
-        .feed-mix-pct { font-size: var(--font-sm); font-weight: 700; color: var(--accent); min-width: 36px; text-align: right; }
+        .feed-selector { padding: var(--space-sm) 0; margin: 0; min-width: 0; }
+        .feed-selector-header { margin-bottom: var(--space-sm); }
+        .feed-selector-title { font-size: var(--font-base); font-weight: 700; margin: 0; }
+        .feed-selector-close { width: 28px; height: 28px; min-width: 28px; min-height: 28px; font-size: var(--font-sm); }
+        .feed-mix-entry { display: flex; align-items: center; gap: var(--space-xs); margin-bottom: var(--space-xs); }
+        .feed-mix-label { flex: 0 0 72px; font-size: var(--font-xs); font-weight: 600; min-width: 0; }
+        .feed-mix-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+        .feed-mix-pct { font-size: var(--font-xs); font-weight: 700; color: var(--accent); min-width: 28px; text-align: right; }
+        .feed-mix-remove { width: 24px; height: 24px; min-width: 24px; min-height: 24px; font-size: var(--font-xs); }
+        .feed-selector-add { margin-top: var(--space-sm); }
+        .feed-selector-add-label { font-size: var(--font-xs); color: var(--muted); margin: 0 0 var(--space-xs); }
+        .feed-selector-add-btns { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+        .feed-selector-add-btn { font-size: var(--font-xs); padding: 2px 6px; }
+        .feed-selector-balance { margin-top: var(--space-sm); width: 100%; justify-content: center; font-size: var(--font-sm); padding: var(--space-xs) var(--space-sm); }
+        .feed-selector-manage { margin-top: var(--space-sm); }
+        .feed-selector-manage-btn { font-size: var(--font-xs); padding: 2px 6px; }
+        .feed-selector-manage-panel { margin-top: var(--space-xs); padding: var(--space-sm) 0; border-top: 1px solid var(--border); }
+        .feed-selector-error { font-size: var(--font-xs); color: var(--danger); margin: 0 0 var(--space-xs); }
+        .feed-selector-saved-list, .feed-selector-suggested-list { list-style: none; margin: 0; padding: 0; }
+        .feed-selector-saved-item, .feed-selector-suggested-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); padding: var(--space-xs) 0; font-size: var(--font-xs); }
+        .feed-selector-saved-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .feed-selector-saved-note { font-size: var(--font-xs); color: var(--muted); }
+        .feed-selector-remove-saved { font-size: var(--font-xs); padding: 2px 6px; color: var(--danger); }
+        .feed-selector-muted { font-size: var(--font-xs); color: var(--muted); }
+        @media (max-width: 480px) {
+          .feed-mix-label { flex: 0 0 56px; }
+        }
       `}</style>
     </div>
   );

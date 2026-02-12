@@ -38,9 +38,11 @@ function getLoopbackClientId(): string {
   const u = new URL(window.location.href);
   const host = u.hostname === 'localhost' ? '127.0.0.1' : u.hostname;
   const port = u.port || (u.protocol === 'https:' ? '443' : '80');
-  const path = u.pathname || '/';
+  // Use the base path (strip trailing file names) so redirect works correctly
+  let path = u.pathname.replace(/\/index\.html$/, '');
+  if (!path.endsWith('/')) path += '/';
   const redirectUri = `http://${host}:${port}${path}`;
-  return `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  return `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent('atproto transition:generic')}`;
 }
 
 /** Load or create the OAuth client (cached). */
@@ -52,12 +54,30 @@ export async function getOAuthClient(): Promise<BrowserOAuthClient> {
     ? getLoopbackClientId()
     : `${getAppBaseUrl()}/client-metadata.json`;
 
+  // Use the public Bluesky AppView as handle resolver – this resolves handles
+  // from ALL PDS instances in the AT Protocol network, not just bsky.social.
+  // The AppView indexes the entire network so any valid AT Protocol handle
+  // (e.g. user.bsky.social, user.custom-domain.com) will be resolved.
   client = await BrowserOAuthClient.load({
     clientId,
-    handleResolver: 'https://bsky.social/',
+    handleResolver: 'https://api.bsky.app/',
     responseMode: 'query',
   });
   return client;
+}
+
+/**
+ * Normalize a handle input for OAuth login.
+ * - Strips leading '@'
+ * - Appends '.bsky.social' if no domain part is present
+ * - Lowercases the result
+ */
+export function normalizeHandle(input: string): string {
+  let h = input.trim().toLowerCase();
+  if (h.startsWith('@')) h = h.slice(1);
+  // If there's no '.' in the handle, assume it's a bsky.social account
+  if (!h.includes('.')) h = `${h}.bsky.social`;
+  return h;
 }
 
 export type OAuthSession = import('@atproto/oauth-client').OAuthSession;
@@ -101,8 +121,9 @@ export async function restoreOAuthSession(did: string): Promise<OAuthSession | n
   } catch { return null; }
 }
 
-/** Start OAuth sign-in – redirects to Bluesky. Never returns. */
+/** Start OAuth sign-in – redirects to the user's PDS. Never returns. */
 export async function signInWithOAuthRedirect(handle: string): Promise<never> {
   const oauth = await getOAuthClient();
-  return oauth.signInRedirect(handle);
+  const normalized = normalizeHandle(handle);
+  return oauth.signInRedirect(normalized);
 }

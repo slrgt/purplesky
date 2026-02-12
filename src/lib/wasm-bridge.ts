@@ -113,6 +113,21 @@ export async function sortByWilsonScore(posts: SortablePost[]): Promise<Sortable
   });
 }
 
+/** Sort posts by net score (likes minus downvotes). Score = +1 per like, -1 per downvote. */
+export async function sortByScore(posts: SortablePost[]): Promise<SortablePost[]> {
+  const mod = await loadWasm();
+  if (typeof mod.sort_by_score === 'function') {
+    const result = (mod.sort_by_score as (json: string) => string)(JSON.stringify(posts));
+    return JSON.parse(result);
+  }
+  // JS fallback
+  return [...posts].sort((a, b) => {
+    const scoreA = a.like_count - a.downvote_count;
+    const scoreB = b.like_count - b.downvote_count;
+    return scoreB - scoreA;
+  });
+}
+
 /** Sort posts by controversial (close to 50/50 vote split). */
 export async function sortByControversial(posts: SortablePost[]): Promise<SortablePost[]> {
   const mod = await loadWasm();

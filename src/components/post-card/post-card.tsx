@@ -22,7 +22,9 @@
 
 import { component$, useSignal, useVisibleTask$, type QRL } from '@builder.io/qwik';
 import { Link } from '@builder.io/qwik-city';
-import type { TimelineItem } from '~/lib/types';
+import type { TimelineItem, CardViewMode } from '~/lib/types';
+import { resizedAvatarUrl } from '~/lib/image-utils';
+import { ActionBar } from '~/components/action-buttons/action-buttons';
 
 import './post-card.css';
 
@@ -35,6 +37,13 @@ interface PostCardProps {
   item: TimelineItem;
   isSeen: boolean;
   onSeen$: QRL<() => void>;
+  /** Card layout: full, mini, art */
+  cardViewMode?: CardViewMode;
+  /** When true, show NSFW blur overlay until user taps (parent tracks unblurred) */
+  nsfwBlurred?: boolean;
+  onNsfwUnblur$?: QRL<() => void>;
+  /** Number of downvotes (for score display). From constellation when available. */
+  downvoteCount?: number;
   /** If set, current user has downvoted this post (value = downvote record URI to undo) */
   myDownvoteUri?: string;
   onDownvote$?: QRL<() => void>;
@@ -42,25 +51,32 @@ interface PostCardProps {
   artboards?: ArtboardOption[];
   onAddToArtboard$?: QRL<(boardId: string) => void>;
   isInAnyArtboard?: boolean;
+  /** Whether this card has keyboard focus */
+  isSelected?: boolean;
+  /** Whether the mouse is over this card (keeps hover look during keyboard nav) */
+  isMouseOver?: boolean;
 }
 
 export const PostCard = component$<PostCardProps>(({
   item,
   isSeen,
   onSeen$,
+  cardViewMode = 'full',
+  nsfwBlurred = false,
+  onNsfwUnblur$,
+  downvoteCount = 0,
   myDownvoteUri,
   onDownvote$,
   onUndoDownvote$,
   artboards = [],
   onAddToArtboard$,
   isInAnyArtboard = false,
+  isSelected = false,
+  isMouseOver = false,
 }) => {
   const post = item.post;
   const record = post.record as { text?: string; createdAt?: string };
   const cardRef = useSignal<HTMLElement>();
-  const isLiked = useSignal(!!post.viewer?.like);
-  const likeCount = useSignal(post.likeCount ?? 0);
-  const showNsfw = useSignal(false);
   const showCollectionDropdown = useSignal(false);
   const isDownvoted = useSignal(!!myDownvoteUri);
 
@@ -76,6 +92,27 @@ export const PostCard = component$<PostCardProps>(({
   // Check NSFW
   const nsfwVals = new Set(['porn', 'sexual', 'nudity', 'graphic-media']);
   const isNsfw = post.labels?.some((l) => nsfwVals.has(l.val)) ?? false;
+
+  // ── Keyboard event handling (like/collect from feed keyboard nav) ─────
+  useVisibleTask$(({ cleanup }) => {
+    if (!cardRef.value) return;
+    const el = cardRef.value;
+    const onLike = () => {
+      const likeBtn = el.querySelector<HTMLElement>('[data-action="like"]');
+      likeBtn?.click();
+    };
+    const onCollect = () => {
+      if (artboards.length > 0) {
+        showCollectionDropdown.value = !showCollectionDropdown.value;
+      }
+    };
+    el.addEventListener('keyboard-like', onLike);
+    el.addEventListener('keyboard-collect', onCollect);
+    cleanup(() => {
+      el.removeEventListener('keyboard-like', onLike);
+      el.removeEventListener('keyboard-collect', onCollect);
+    });
+  });
 
   // ── Seen tracking via IntersectionObserver ─────────────────────────────
   useVisibleTask$(({ cleanup }) => {
@@ -113,10 +150,12 @@ export const PostCard = component$<PostCardProps>(({
   const postPath = `/post/${encodeURIComponent(post.uri)}/`;
   const profilePath = `/profile/${encodeURIComponent(post.author.handle)}/`;
 
+  const showNsfwOverlay = nsfwBlurred;
+
   return (
     <article
       ref={cardRef}
-      class={`post-card glass ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''}`}
+      class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}
@@ -145,9 +184,14 @@ export const PostCard = component$<PostCardProps>(({
                 <div class="post-video-play">▶</div>
               </div>
             )}
-            {/* NSFW overlay */}
-            {isNsfw && !showNsfw.value && (
-              <div class="post-nsfw-overlay" onClick$={(e) => { e.preventDefault(); showNsfw.value = true; }}>
+            {showNsfwOverlay && (
+              <div
+                class="post-nsfw-overlay"
+                onClick$={(e) => { e.preventDefault(); onNsfwUnblur$?.(); }}
+                role="button"
+                tabIndex={0}
+                onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNsfwUnblur$?.(); } }}
+              >
                 <span>Sensitive Content</span>
                 <small>Tap to reveal</small>
               </div>
@@ -156,80 +200,63 @@ export const PostCard = component$<PostCardProps>(({
         </Link>
       )}
 
-      {/* ── Author Row ───────────────────────────────────────────────── */}
-      <div class="post-meta">
-        <Link href={profilePath} class="post-author">
-          {post.author.avatar && (
-            <img src={post.author.avatar} alt="" class="post-avatar" width="24" height="24" loading="lazy" />
-          )}
-          <span class="post-handle truncate">
-            {post.author.displayName || post.author.handle}
-          </span>
-        </Link>
-        <span class="post-time">{timeAgo}</span>
-      </div>
+      {/* ── Author Row (hidden in mini except inline) ──────────────────── */}
+      {(cardViewMode === 'full' || cardViewMode === 'art') && (
+        <div class="post-meta">
+          <Link href={profilePath} class="post-author">
+            {post.author.avatar && (
+              <img src={resizedAvatarUrl(post.author.avatar, 24)} alt="" class="post-avatar" width="24" height="24" loading="lazy" />
+            )}
+            <span class="post-handle truncate">
+              {post.author.displayName || post.author.handle}
+            </span>
+          </Link>
+          <span class="post-time">{timeAgo}</span>
+        </div>
+      )}
 
-      {/* ── Text ─────────────────────────────────────────────────────── */}
-      {record?.text && (
+      {/* ── Text (full: full snippet; art: one line; mini: skip) ────────── */}
+      {record?.text && cardViewMode !== 'mini' && (
         <Link href={postPath} class="post-text-link">
-          <p class="post-text">
-            {record.text.length > 200 ? record.text.slice(0, 200) + '…' : record.text}
+          <p class={`post-text ${cardViewMode === 'art' ? 'post-text-art' : ''}`}>
+            {cardViewMode === 'art'
+              ? (record.text.length > 80 ? record.text.slice(0, 80) + '…' : record.text)
+              : (record.text.length > 200 ? record.text.slice(0, 200) + '…' : record.text)}
           </p>
         </Link>
       )}
 
-      {/* ── Action Row ───────────────────────────────────────────────── */}
+      {/* Mini: compact author + time inline */}
+      {cardViewMode === 'mini' && (
+        <div class="post-meta post-meta-mini">
+          <Link href={profilePath} class="post-author">
+            {post.author.avatar && (
+              <img src={resizedAvatarUrl(post.author.avatar, 20)} alt="" class="post-avatar" width="20" height="20" loading="lazy" />
+            )}
+            <span class="post-handle truncate">{post.author.handle}</span>
+          </Link>
+          <span class="post-time">{timeAgo}</span>
+        </div>
+      )}
+
+      {/* ── Action Row (reusable ActionBar + collection) ───────────────── */}
       <div class="post-actions">
-        {/* Like (counts as upvote) */}
-        <button
-          class={`post-action ${isLiked.value ? 'post-action-active' : ''}`}
-          aria-label={isLiked.value ? 'Unlike' : 'Like'}
-          onClick$={async () => {
-            if (!isLiked.value) {
-              isLiked.value = true;
-              likeCount.value++;
-              try {
-                const { agent } = await import('~/lib/bsky');
-                await agent.like(post.uri, post.cid);
-              } catch { isLiked.value = false; likeCount.value--; }
-            }
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill={isLiked.value ? 'var(--error)' : 'none'} stroke={isLiked.value ? 'var(--error)' : 'currentColor'} stroke-width="2">
-            <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-          </svg>
-          {likeCount.value > 0 && <span>{likeCount.value}</span>}
-        </button>
-
-        {/* Downvote (Microcosm constellation) */}
-        {(onDownvote$ || onUndoDownvote$) && (
-          <button
-            class={`post-action ${(isDownvoted.value || !!myDownvoteUri) ? 'post-action-active' : ''}`}
-            aria-label={(isDownvoted.value || myDownvoteUri) ? 'Remove downvote' : 'Downvote'}
-            onClick$={async () => {
-              const currentlyDownvoted = isDownvoted.value || !!myDownvoteUri;
-              if (currentlyDownvoted && onUndoDownvote$) {
-                onUndoDownvote$();
-                isDownvoted.value = false;
-              } else if (!currentlyDownvoted && onDownvote$) {
-                onDownvote$();
-                isDownvoted.value = true;
-              }
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill={(isDownvoted.value || myDownvoteUri) ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2">
-              <path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3zm7-13h2.67A2.31 2.31 0 0122 4v7a2.31 2.31 0 01-2.33 2H17" />
-            </svg>
-          </button>
-        )}
-
-        {/* Comment */}
-        <Link href={postPath} class="post-action" aria-label="Comment">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-          </svg>
-          {(post.replyCount ?? 0) > 0 && <span>{post.replyCount}</span>}
-        </Link>
+        <ActionBar
+          subjectUri={post.uri}
+          subjectCid={post.cid}
+          likeCount={post.likeCount ?? 0}
+          liked={!!post.viewer?.like}
+          likeRecordUri={post.viewer?.like}
+          downvoteCount={downvoteCount}
+          downvoted={isDownvoted.value || !!myDownvoteUri}
+          downvoteRecordUri={myDownvoteUri}
+          onDownvote$={onDownvote$}
+          onUndoDownvote$={onUndoDownvote$}
+          replyCount={post.replyCount ?? 0}
+          replyHref={postPath}
+          hideVoteCounts
+          likeIcon="heart"
+        />
 
         {/* Save to collection */}
         {artboards.length > 0 && onAddToArtboard$ && (

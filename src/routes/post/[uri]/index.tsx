@@ -22,6 +22,8 @@
 import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
 import { useLocation } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
+import { ActionBar } from '~/components/action-buttons/action-buttons';
+import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { PostView } from '~/lib/types';
 
 export default component$(() => {
@@ -33,14 +35,41 @@ export default component$(() => {
   const thread = useSignal<unknown>(null);
   const loading = useSignal(true);
   const replyText = useSignal('');
+  /** Map post/reply URI -> downvote record URI (for "I downvoted" state) */
+  const myDownvoteUris = useSignal<Record<string, string>>({});
+  /** Downvote counts per reply URI (for comment sort by score) */
+  const replyDownvoteCounts = useSignal<Record<string, number>>({});
+  /** Comment sort mode */
+  const commentSortMode = useSignal<'newest' | 'oldest' | 'best' | 'controversial'>('best');
 
   useVisibleTask$(async () => {
     try {
       const { agent, publicAgent, getSession } = await import('~/lib/bsky');
-      const client = getSession() ? agent : publicAgent;
+      const session = getSession();
+      const client = session ? agent : publicAgent;
       const res = await client.getPostThread({ uri, depth: 10 });
       thread.value = res.data.thread;
       post.value = (res.data.thread as { post?: PostView })?.post ?? null;
+      if (session?.did) {
+        const { listMyDownvotes } = await import('~/lib/bsky');
+        myDownvoteUris.value = await listMyDownvotes();
+      }
+      // Collect all reply URIs (and main post) for downvote counts
+      const replyUris: string[] = [];
+      const mainPost = (res.data.thread as { post?: PostView })?.post;
+      if (mainPost?.uri) replyUris.push(mainPost.uri);
+      function collectUris(t: unknown) {
+        if (!t || typeof t !== 'object') return;
+        const node = t as { post?: PostView; replies?: unknown[] };
+        if (node.post?.uri) replyUris.push(node.post.uri);
+        (node.replies ?? []).forEach(collectUris);
+      }
+      const root = res.data.thread as { replies?: unknown[] };
+      (root?.replies ?? []).forEach(collectUris);
+      if (replyUris.length > 0) {
+        const { getDownvoteCounts } = await import('~/lib/constellation');
+        replyDownvoteCounts.value = await getDownvoteCounts(replyUris);
+      }
     } catch (err) {
       console.error('Failed to load post:', err);
     }
@@ -101,18 +130,43 @@ export default component$(() => {
   const videoPlaylist = (embed?.playlist as string) ?? (embed?.media as { playlist?: string })?.playlist;
   const videoRef = useSignal<HTMLVideoElement>();
 
-  /** Flatten AT Protocol thread (nested replies) into array of { post, depth } for display */
+  /** Flatten thread with sort applied at each level (newest/oldest/best/controversial) */
   const flattenedReplies = (() => {
-    const out: Array<{ post: PostView; depth: number }> = [];
-    function walk(t: unknown, depth: number) {
-      if (!t || typeof t !== 'object') return;
-      const node = t as { post?: PostView; replies?: unknown[] };
-      if (node.post && node.post.uri) out.push({ post: node.post, depth });
-      (node.replies ?? []).forEach((r) => walk(r, depth + 1));
+    const mode = commentSortMode.value;
+    const downvoteCounts = replyDownvoteCounts.value;
+    const getCreated = (n: { post?: PostView }) => ((n.post?.record as { createdAt?: string })?.createdAt ?? '');
+    const getScore = (n: { post?: PostView }) => (n.post?.likeCount ?? 0) - (n.post ? (downvoteCounts[n.post.uri] ?? 0) : 0);
+    const getControversy = (n: { post?: PostView }) => {
+      if (!n.post) return 0;
+      const likes = n.post.likeCount ?? 0;
+      const downs = downvoteCounts[n.post.uri] ?? 0;
+      const total = likes + downs;
+      if (total === 0) return 0;
+      const ratio = likes / total;
+      return total * (1 - 2 * Math.abs(ratio - 0.5));
+    };
+    function sortNodes(nodes: Array<{ post?: PostView; replies?: unknown[] }>) {
+      return [...nodes].sort((a, b) => {
+        if (mode === 'newest') return getCreated(b).localeCompare(getCreated(a));
+        if (mode === 'oldest') return getCreated(a).localeCompare(getCreated(b));
+        if (mode === 'best') return getScore(b) - getScore(a);
+        if (mode === 'controversial') return getControversy(b) - getControversy(a);
+        return 0;
+      });
+    }
+    function walk(nodes: unknown[], depth: number): Array<{ post: PostView; depth: number }> {
+      if (!nodes?.length) return [];
+      const typed = nodes.map((n) => n as { post?: PostView; replies?: unknown[] }).filter((n) => n.post?.uri);
+      const sorted = sortNodes(typed);
+      const out: Array<{ post: PostView; depth: number }> = [];
+      for (const node of sorted) {
+        out.push({ post: node.post!, depth });
+        out.push(...walk(node.replies ?? [], depth + 1));
+      }
+      return out;
     }
     const root = thread.value as { replies?: unknown[] };
-    (root?.replies ?? []).forEach((r) => walk(r, 0));
-    return out;
+    return walk(root?.replies ?? [], 0);
   })();
 
   return (
@@ -121,7 +175,7 @@ export default component$(() => {
         {/* Author */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
           {p.author.avatar && (
-            <img src={p.author.avatar} alt="" width="40" height="40" style={{ borderRadius: '50%' }} />
+            <img src={resizedAvatarUrl(p.author.avatar, 40)} alt="" width="40" height="40" style={{ borderRadius: '50%' }} />
           )}
           <div>
             <div style={{ fontWeight: '600' }}>{p.author.displayName || p.author.handle}</div>
@@ -163,13 +217,34 @@ export default component$(() => {
           </div>
         )}
 
-        {/* Stats */}
-        <div style={{ display: 'flex', gap: 'var(--space-lg)', fontSize: 'var(--font-sm)', color: 'var(--muted)', paddingTop: 'var(--space-md)', borderTop: '1px solid var(--border)' }}>
-          <span>{p.likeCount ?? 0} likes</span>
-          <span>{p.repostCount ?? 0} reposts</span>
-          <span>{p.replyCount ?? 0} replies</span>
-          {record?.createdAt && <span>{new Date(record.createdAt).toLocaleString()}</span>}
+        {/* Actions: Like, Downvote, Reply */}
+        <div style={{ paddingTop: 'var(--space-md)', borderTop: '1px solid var(--border)' }}>
+          <ActionBar
+            subjectUri={p.uri}
+            subjectCid={p.cid}
+            likeCount={p.likeCount ?? 0}
+            liked={!!p.viewer?.like}
+            likeRecordUri={p.viewer?.like}
+            downvoteCount={replyDownvoteCounts.value[p.uri] ?? 0}
+            downvoted={!!myDownvoteUris.value[p.uri]}
+            downvoteRecordUri={myDownvoteUris.value[p.uri]}
+            onDownvote$={app.session.isLoggedIn ? $(async () => {
+              myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
+              replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [p.uri]: (replyDownvoteCounts.value[p.uri] ?? 0) + 1 };
+            }) : undefined}
+            onUndoDownvote$={app.session.isLoggedIn ? $(async () => {
+              myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
+              replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [p.uri]: Math.max(0, (replyDownvoteCounts.value[p.uri] ?? 0) - 1) };
+            }) : undefined}
+            replyCount={p.replyCount ?? 0}
+            replyHref={`/post/${encodeURIComponent(p.uri)}/`}
+          />
         </div>
+        {record?.createdAt && (
+          <div style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', marginTop: 'var(--space-xs)' }}>
+            {new Date(record.createdAt).toLocaleString()}
+          </div>
+        )}
       </article>
 
       {/* Reply Composer */}
@@ -185,9 +260,24 @@ export default component$(() => {
         </div>
       )}
 
-      {/* Thread replies (flattened from nested structure) */}
+      {/* Comment sort + thread replies */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-        {flattenedReplies.map(({ post: rp, depth }, i) => {
+        {flattenedReplies.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
+            <span style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)' }}>Sort:</span>
+            <select
+              value={commentSortMode.value}
+              onChange$={(_, el) => { commentSortMode.value = el.value as typeof commentSortMode.value; }}
+              style={{ fontSize: 'var(--font-sm)', padding: 'var(--space-xs) var(--space-sm)', borderRadius: 'var(--glass-radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="best">Best</option>
+              <option value="controversial">Controversial</option>
+            </select>
+          </div>
+        )}
+        {flattenedReplies.map(({ post: rp, depth }) => {
           const rr = rp.record as { text?: string; createdAt?: string };
           return (
             <div
@@ -197,7 +287,7 @@ export default component$(() => {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
                 {rp.author.avatar && (
-                  <img src={rp.author.avatar} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />
+                  <img src={resizedAvatarUrl(rp.author.avatar, 24)} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />
                 )}
                 <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>
                   {rp.author.displayName || rp.author.handle}
@@ -209,6 +299,27 @@ export default component$(() => {
               {rr?.text && (
                 <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{rr.text}</p>
               )}
+              <ActionBar
+                subjectUri={rp.uri}
+                subjectCid={rp.cid}
+                likeCount={rp.likeCount ?? 0}
+                liked={!!rp.viewer?.like}
+                likeRecordUri={rp.viewer?.like}
+                downvoteCount={replyDownvoteCounts.value[rp.uri] ?? 0}
+                downvoted={!!myDownvoteUris.value[rp.uri]}
+                downvoteRecordUri={myDownvoteUris.value[rp.uri]}
+                onDownvote$={app.session.isLoggedIn ? $(async () => {
+                  myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
+                  replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: (replyDownvoteCounts.value[rp.uri] ?? 0) + 1 };
+                }) : undefined}
+                onUndoDownvote$={app.session.isLoggedIn ? $(async () => {
+                  myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
+                  replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: Math.max(0, (replyDownvoteCounts.value[rp.uri] ?? 0) - 1) };
+                }) : undefined}
+                replyCount={rp.replyCount ?? 0}
+                replyHref={`/post/${encodeURIComponent(uri)}/`}
+                compact
+              />
             </div>
           );
         })}

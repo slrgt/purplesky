@@ -21,7 +21,7 @@
  */
 
 import { createContextId, useContext, useContextProvider, useStore } from '@builder.io/qwik';
-import type { ThemeMode, ViewColumns, FeedMixEntry } from '~/lib/types';
+import type { ThemeMode, ViewColumns, FeedMixEntry, CardViewMode } from '~/lib/types';
 
 // ── Store Shape ───────────────────────────────────────────────────────────
 
@@ -47,12 +47,16 @@ export interface AppStore {
   mediaOnly: boolean;
   /** NSFW filter mode */
   nsfwMode: 'hide' | 'blur' | 'show';
+  /** Card view: full, mini, art */
+  cardViewMode: CardViewMode;
   /** Notification count */
   unreadCount: number;
   /** Login modal visibility */
   showLoginModal: boolean;
   /** Compose modal visibility */
   showComposeModal: boolean;
+  /** Global toast message (shown in layout; auto-cleared after delay) */
+  toastMessage: string | null;
 }
 
 // ── Context ID ────────────────────────────────────────────────────────────
@@ -82,9 +86,11 @@ export function useAppProvider() {
     artOnly: false,
     mediaOnly: false,
     nsfwMode: 'blur',
+    cardViewMode: 'full',
     unreadCount: 0,
     showLoginModal: false,
     showComposeModal: false,
+    toastMessage: null,
   });
 
   useContextProvider(AppContext, store);

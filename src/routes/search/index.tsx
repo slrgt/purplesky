@@ -4,6 +4,7 @@
 
 import { component$, useSignal, useVisibleTask$ } from '@builder.io/qwik';
 import { Link, useLocation } from '@builder.io/qwik-city';
+import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { PostView } from '~/lib/types';
 
 export default component$(() => {
@@ -98,7 +99,7 @@ export default component$(() => {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
                   {p.author?.avatar && (
-                    <img src={p.author.avatar} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />
+                    <img src={resizedAvatarUrl(p.author.avatar, 24)} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />
                   )}
                   <span style={{ fontWeight: '600' }}>{p.author?.displayName || p.author?.handle}</span>
                   <span style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>@{p.author?.handle}</span>

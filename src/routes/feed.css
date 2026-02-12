@@ -133,6 +133,132 @@
   margin-right: auto;
 }
 
+/* ── Floating Feeds button (artsky-style, top center) ────────────────────── */
+.feeds-float-wrap {
+  position: fixed;
+  top: max(var(--space-md), env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.feeds-float-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 8px 14px 8px 18px;
+  border: none;
+  border-radius: 100px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+}
+.feeds-float-btn:hover {
+  transform: scale(1.02);
+}
+.feeds-float-btn-active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.feeds-float-label {
+  white-space: nowrap;
+}
+.feeds-float-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--glass-highlight);
+  transition: transform var(--transition-fast);
+}
+.feeds-float-dropdown {
+  top: 100%;
+  margin-top: var(--space-sm);
+  left: 50%;
+  transform: translateX(-50%);
+  position: absolute;
+  width: min(320px, calc(100vw - 1.5rem));
+  max-width: calc(100vw - 1.5rem);
+  max-height: min(55vh, 420px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: var(--glass-radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
+  padding: var(--space-sm) var(--space-md);
+  z-index: 100;
+  box-shadow: var(--shadow-dropdown);
+}
+@media (max-width: 480px) {
+  .feeds-float-dropdown {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+    max-height: min(45vh, 320px);
+    padding: var(--space-xs) var(--space-sm);
+  }
+}
+.feed-selector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: transparent;
+}
+
+/* ── Floating "Hide Seen" Button (icon only), centered over Home tab ─────── */
+.hide-seen-fab {
+  position: fixed;
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space-md) + var(--space-lg));
+  /* Center over the first nav tab (Home): nav is 50% - 50% width; first tab ~80px from left edge */
+  left: calc(50% - 165px);
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+}
+.hide-seen-fab:hover {
+  transform: translateX(-50%) scale(1.05);
+}
+.hide-seen-fab:active {
+  transform: translateX(-50%) scale(0.97);
+}
+
+/* ── Toast notification ────────────────────────────────────────────────── */
+.feed-toast {
+  position: fixed;
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space-xl));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 10px 18px;
+  border-radius: 100px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--text);
+  box-shadow: var(--shadow-dropdown);
+  animation: feed-toast-in 0.2s ease-out;
+}
+@keyframes feed-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .masonry-grid {

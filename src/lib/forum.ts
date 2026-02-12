@@ -55,6 +55,22 @@ export async function createForumPost(opts: {
   return { uri: res.data.uri, cid: res.data.cid };
 }
 
+/** Suggest forum tags (from app.purplesky.forum.post lexicon) for composer % trigger. */
+export async function suggestForumTags(prefix: string, limit = 15): Promise<string[]> {
+  const session = getSession();
+  if (!session?.did) return [];
+  const { posts } = await listForumPosts(session.did, { limit: 100 });
+  const tagSet = new Set<string>();
+  for (const post of posts) {
+    for (const t of post.tags ?? []) {
+      if (typeof t === 'string' && t.length > 0) {
+        if (!prefix || t.toLowerCase().startsWith(prefix.toLowerCase())) tagSet.add(t);
+      }
+    }
+  }
+  return Array.from(tagSet).sort().slice(0, limit);
+}
+
 /** List forum posts from a user's repo. */
 export async function listForumPosts(
   did: string,
@@ -121,6 +137,32 @@ export async function getForumPost(uri: string): Promise<ForumPost | null> {
   } catch {
     return null;
   }
+}
+
+/** Edit a forum post. Only the author can edit. */
+export async function editForumPost(uri: string, opts: {
+  title?: string;
+  body?: string;
+  tags?: string[];
+}): Promise<void> {
+  const post = await getForumPost(uri);
+  if (!post) throw new Error('Post not found');
+  const session = getSession();
+  if (!session?.did || session.did !== post.did) throw new Error('Not authorized');
+  await agent.com.atproto.repo.putRecord({
+    repo: session.did, collection: FORUM_POST_COLLECTION, rkey: post.rkey,
+    record: {
+      $type: FORUM_POST_COLLECTION,
+      title: (opts.title ?? post.title ?? '').trim(),
+      body: (opts.body ?? post.body ?? '').trim(),
+      tags: opts.tags ?? post.tags ?? [],
+      createdAt: post.createdAt,
+      isPinned: post.isPinned,
+      isWiki: post.isWiki,
+      editedAt: new Date().toISOString(),
+    },
+    validate: false,
+  });
 }
 
 /** Delete a forum post. Only the author can delete. */

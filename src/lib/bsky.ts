@@ -572,12 +572,43 @@ export async function getSuggestedFollows(
   return results;
 }
 
+// ── Follow / Unfollow ─────────────────────────────────────────────────
+
+/** Follow a user. Returns the follow record URI. */
+export async function followUser(did: string): Promise<string> {
+  const session = getSession();
+  if (!session?.did) throw new Error('Not logged in');
+  const res = await agent.com.atproto.repo.createRecord({
+    repo: session.did,
+    collection: 'app.bsky.graph.follow',
+    record: {
+      $type: 'app.bsky.graph.follow',
+      subject: did,
+      createdAt: new Date().toISOString(),
+    },
+  });
+  return res.data.uri;
+}
+
+/** Unfollow a user by deleting the follow record. */
+export async function unfollowUser(followUri: string): Promise<void> {
+  const session = getSession();
+  if (!session?.did) throw new Error('Not logged in');
+  const parsed = parseAtUri(followUri);
+  if (!parsed) throw new Error('Invalid follow URI');
+  await agent.com.atproto.repo.deleteRecord({
+    repo: session.did,
+    collection: 'app.bsky.graph.follow',
+    rkey: parsed.rkey,
+  });
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────
 
 export async function getNotifications(limit = 30, cursor?: string) {
   const res = await agent.listNotifications({ limit, cursor });
   return {
-    notifications: (res.data.notifications || []).map((n: Record<string, unknown>) => ({
+    notifications: (res.data.notifications || []).map((n) => ({
       uri: n.uri, author: n.author, reason: n.reason,
       reasonSubject: n.reasonSubject, isRead: n.isRead, indexedAt: n.indexedAt,
     })),
@@ -592,9 +623,37 @@ export async function getUnreadNotificationCount(): Promise<number> {
 
 // ── Saved Feeds ───────────────────────────────────────────────────────────
 
-export async function getSavedFeeds(): Promise<Array<{ id: string; type: string; value: string; pinned: boolean }>> {
+export type SavedFeedItem = { id: string; type: string; value: string; pinned: boolean };
+
+export async function getSavedFeeds(): Promise<SavedFeedItem[]> {
   const prefs = await agent.getPreferences();
-  return (prefs as { savedFeeds?: Array<{ id: string; type: string; value: string; pinned: boolean }> }).savedFeeds ?? [];
+  const list = (prefs as { savedFeeds?: SavedFeedItem[] }).savedFeeds ?? [];
+  return list;
+}
+
+/** Add feeds to the user's saved list on their PDS. */
+export async function addSavedFeeds(feeds: Array<{ type: 'feed' | 'timeline'; value: string; pinned?: boolean }>): Promise<void> {
+  const a = getAgent() as { addSavedFeeds?: (arg: Array<{ type: string; value: string; pinned?: boolean }>) => Promise<unknown> };
+  if (typeof a.addSavedFeeds !== 'function') throw new Error('addSavedFeeds not available');
+  await a.addSavedFeeds(feeds.map((f) => ({ type: f.type, value: f.value, pinned: f.pinned ?? false })));
+}
+
+/** Remove feeds from the user's saved list by id. */
+export async function removeSavedFeeds(ids: string[]): Promise<void> {
+  const a = getAgent() as { removeSavedFeeds?: (ids: string[]) => Promise<unknown> };
+  if (typeof a.removeSavedFeeds !== 'function') throw new Error('removeSavedFeeds not available');
+  await a.removeSavedFeeds(ids);
+}
+
+/** Suggested feeds (discover) for the account. */
+export async function getSuggestedFeeds(limit = 20, cursor?: string): Promise<{ feeds: Array<{ uri: string; displayName?: string; description?: string }>; cursor?: string }> {
+  const res = await agent.app.bsky.feed.getSuggestedFeeds({ limit, cursor });
+  const feeds = (res.data.feeds ?? []).map((f: { uri: string; displayName?: string; description?: string }) => ({
+    uri: f.uri,
+    displayName: f.displayName,
+    description: f.description,
+  }));
+  return { feeds, cursor: res.data.cursor };
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────

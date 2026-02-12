@@ -225,12 +225,12 @@ body {
   outline-offset: 2px;
 }
 
-/* ── Links ─────────────────────────────────────────────────────────────── */
+/* ── Links (only clickable links get underline) ──────────────────────────── */
 a {
   color: var(--accent);
   text-decoration: none;
 }
-a:hover {
+a[href]:hover {
   text-decoration: underline;
 }
 
@@ -318,6 +318,40 @@ select:focus {
   -webkit-backdrop-filter: blur(var(--glass-blur-strong));
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius);
+}
+
+/* ── Floating button glass (reusable; matches bottom nav .glass) ────────── */
+.float-btn {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-card);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.float-btn:hover {
+  box-shadow: var(--shadow-dropdown);
+}
+.float-btn:active {
+  transform: scale(0.97);
+}
+
+/* ── Hide floating overlay + bottom nav while scrolling (feed page) ─────── */
+.floating-top-right,
+.feeds-float-wrap,
+.hide-seen-fab,
+.nav {
+  transition: opacity 0.2s ease;
+}
+body.feed-scrolling .floating-top-right,
+body.feed-scrolling .feeds-float-wrap,
+body.feed-scrolling .hide-seen-fab,
+body.feed-scrolling .nav {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ── Utility Classes ───────────────────────────────────────────────────── */
