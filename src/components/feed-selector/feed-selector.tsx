@@ -24,11 +24,19 @@ function savedFeedLabel(f: SavedFeedItem): string {
 
 export const FeedSelector = component$<FeedSelectorProps>(({ onClose$ }) => {
   const app = useAppState();
+  /** Local copy of percents so the % label updates live when dragging the slider */
+  const percentValues = useSignal<number[]>([]);
   const savedFeeds = useSignal<SavedFeedItem[]>([]);
   const showManage = useSignal(false);
   const suggestedFeeds = useSignal<Array<{ uri: string; displayName?: string; description?: string }>>([]);
   const loadingSuggested = useSignal(false);
   const manageError = useSignal('');
+
+  useVisibleTask$(({ track }) => {
+    track(() => app.feedMix.map((e) => e.percent));
+    track(() => app.feedMix.length);
+    percentValues.value = app.feedMix.map((e) => e.percent);
+  });
 
   const refreshSavedFeeds = $(async () => {
     try {
@@ -56,16 +64,18 @@ export const FeedSelector = component$<FeedSelectorProps>(({ onClose$ }) => {
             type="range"
             min="0"
             max="100"
-            value={entry.percent}
+            value={percentValues.value[i] ?? entry.percent}
             class="feed-mix-slider"
             onInput$={(_, el) => {
               const pct = Math.min(100, Math.max(0, parseInt(el.value, 10) || 0));
-              app.feedMix = app.feedMix.map((e, j) =>
+              const next = app.feedMix.map((e, j) =>
                 j === i ? { ...e, percent: pct } : e,
               );
+              app.feedMix = next;
+              percentValues.value = next.map((e) => e.percent);
             }}
           />
-          <span class="feed-mix-pct">{entry.percent}%</span>
+          <span class="feed-mix-pct">{percentValues.value[i] ?? entry.percent}%</span>
           <button
             class="icon-btn feed-mix-remove"
             onClick$={() => {
