@@ -335,7 +335,8 @@ export default component$(() => {
       if (isHome) return;
       routeSyncState.done = true;
       const cleanSearch = window.location.search;
-      const target = pathname + cleanSearch + window.location.hash;
+      // Pass path relative to base so Qwik router doesn't double-apply base (avoids /purplesky/purplesky/...)
+      const target = (pathAfterBase || '/') + cleanSearch + window.location.hash;
       await nav(target);
     } catch { /* ignore route sync errors */ }
   });
@@ -528,7 +529,8 @@ export default component$(() => {
         const pathname = loc.url.pathname;
         const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
         const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
-        if (pathAfterBase !== '/' && pathAfterBase !== '' && !pathAfterBase.startsWith('/feed')) {
+        const pathForBack = pathAfterBase || '/';
+        if (pathForBack !== '/' && !pathForBack.startsWith('/feed')) {
           e.preventDefault();
           window.history.back();
         }
@@ -550,6 +552,7 @@ export default component$(() => {
 
   const pathname = loc.url.pathname;
   const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+  // pathAfterBase: path relative to app base (Qwik may give pathname with or without base depending on context)
   const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
   const isHome = pathAfterBase === '/' || pathAfterBase === '';
   const searchParams = new URLSearchParams(loc.url.search);
@@ -557,6 +560,8 @@ export default component$(() => {
   const showBackButton = !isHome && !isOAuthCallback;
   /** Full href for nav items (include base so bottom nav works when deployed at subpath) */
   const navHref = (path: string) => (path === '/' ? `${base}/` : `${base}${path}`);
+  /** Path for matching active tab (compare segment after base to item.href) */
+  const pathForActive = pathAfterBase;
 
   return (
     <div class="app-shell">
@@ -919,8 +924,8 @@ export default component$(() => {
       <nav class="nav glass" aria-label="Main navigation" role="tablist">
         {navItems.map((item) => {
           const fullHref = navHref(item.href);
-          const isActive = pathname === fullHref ||
-            (item.href !== '/' && pathname.startsWith(fullHref));
+          const isActive = pathForActive === item.href ||
+            (item.href !== '/' && pathForActive.startsWith(item.href));
           return (
             <Link
               key={item.href}
@@ -937,7 +942,7 @@ export default component$(() => {
         })}
         <button
           type="button"
-          class={`nav-tab ${pathname.startsWith(navHref('/search')) || navSearchOpen.value ? 'nav-tab-active' : ''}`}
+          class={`nav-tab ${pathForActive.startsWith('/search') || navSearchOpen.value ? 'nav-tab-active' : ''}`}
           role="tab"
           aria-label="Search"
           aria-expanded={navSearchOpen.value}
@@ -946,7 +951,7 @@ export default component$(() => {
             if (navSearchOpen.value) setTimeout(() => navSearchRef.value?.focus(), 50);
           }}
         >
-          <NavIcon name="search" active={pathname.startsWith(navHref('/search')) || navSearchOpen.value} />
+          <NavIcon name="search" active={pathForActive.startsWith('/search') || navSearchOpen.value} />
           <span class="nav-label">Search</span>
         </button>
       </nav>
