@@ -48,6 +48,10 @@ export default component$(() => {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
+        {/* Avoid caching HTML so users get fresh chunk references after deploys (avoids "Loading failed" for old q-*.js) */}
+        <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+        <meta httpEquiv="Pragma" content="no-cache" />
+
         {/* App info */}
         <title>PurpleSky</title>
         <meta name="description" content="Bluesky PWA – feeds, forums, consensus, collaboration" />

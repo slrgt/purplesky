@@ -92,6 +92,20 @@ jobs:
           # SPA fallback: copy index.html to 404.html for client-side routing
           cp "$DEPLOY_DIR/index.html" "$DEPLOY_DIR/404.html"
 
+          # Ensure client chunks are under DEPLOY_DIR/build/ so that
+          # /purplesky/build/q-*.js (and other assets) resolve correctly.
+          # Qwik/Vite may emit chunks to dist/build/ instead of dist/REPO_NAME/build/.
+          if [ -d "dist/build" ] && [ ! -d "$DEPLOY_DIR/build" ]; then
+            cp -r dist/build "$DEPLOY_DIR/build"
+            echo "Copied dist/build to $DEPLOY_DIR/build"
+          fi
+          if [ -d "$DEPLOY_DIR/build" ]; then
+            echo "=== Chunks in $DEPLOY_DIR/build (first 20) ==="
+            ls "$DEPLOY_DIR/build" | head -20
+          else
+            echo "::warning::$DEPLOY_DIR/build not found – JS chunks may 404. Check Qwik build output."
+          fi
+
           # Disable Jekyll processing (required for serving JS/CSS/JSON files)
           touch "$DEPLOY_DIR/.nojekyll"
 
