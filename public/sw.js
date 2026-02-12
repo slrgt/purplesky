@@ -24,8 +24,8 @@
  */
 
 // Bump version when deploying so old cached JS/CSS are dropped (avoids running stale code).
-const CACHE_NAME = 'purplesky-v4';
-const STATIC_CACHE = 'purplesky-static-v4';
+const CACHE_NAME = 'purplesky-v5';
+const STATIC_CACHE = 'purplesky-static-v5';
 const IMAGE_CACHE = 'purplesky-images-v1';
 const API_CACHE = 'purplesky-api-v1';
 
@@ -99,6 +99,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Navigation requests (HTML pages): Network-first so users always get the
+  // latest app shell. Falls back to cached index.html for offline / 404 (GitHub
+  // Pages returns 404 for dynamic routes that aren't pre-rendered).
+  if (event.request.mode === 'navigate') {
+    event.respondWith(networkFirstNav(event.request));
+    return;
+  }
+
   // API calls: Network-first with cache fallback
   if (url.hostname.includes('bsky.social') ||
       url.hostname.includes('bsky.app') ||
@@ -142,6 +150,35 @@ async function cacheFirst(request, cacheName) {
       return caches.match(`${BASE}index.html`);
     }
     return new Response('Offline', { status: 503 });
+  }
+}
+
+// ── Network-First for Navigation ──────────────────────────────────────────
+// Fetches fresh HTML from the network. On non-OK responses (e.g. 404 on GitHub
+// Pages for dynamic routes like /post/xyz/) falls back to the cached app shell
+// so the client-side router can handle the route. On network failure (offline),
+// tries the exact URL cache, then the app shell.
+async function networkFirstNav(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(STATIC_CACHE);
+      cache.put(request, response.clone());
+      return response;
+    }
+    // Server returned error (e.g. 404) – serve app shell for client-side routing
+    return (await caches.match(`${BASE}index.html`)) ||
+           (await caches.match(BASE)) ||
+           response;
+  } catch {
+    // Network error (offline) – try cache, then app shell
+    return (await caches.match(request)) ||
+           (await caches.match(`${BASE}index.html`)) ||
+           (await caches.match(BASE)) ||
+           new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
+             status: 503,
+             headers: { 'Content-Type': 'text/html' },
+           });
   }
 }
 

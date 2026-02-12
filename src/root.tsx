@@ -54,6 +54,43 @@ export default component$(() => {
         <link rel="manifest" href={`${import.meta.env.BASE_URL}manifest.json`} />
         <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}icon.svg`} />
         <link rel="apple-touch-icon" href={`${import.meta.env.BASE_URL}icon.svg`} />
+
+        {/* Phantom-click guard: blocks link/button activation unless preceded by a
+            real pointerdown+pointerup on the same element. Must be an inline script
+            so it registers on document (capture phase) BEFORE Qwik's event delegation
+            boots, otherwise Qwik processes Link navigations before the guard can
+            intercept them. */}
+        <script dangerouslySetInnerHTML={`(function(){
+  var s={downEl:null,upOk:false,lastPT:0};
+  var SEL='a[href],button';
+  var PT_KEY_MS=500;
+  function isReal(e){
+    return(e.pointerType==='mouse'&&e.button===0)||e.pointerType==='touch'||(e.pointerType==='pen'&&e.isPrimary);
+  }
+  document.addEventListener('pointerdown',function(e){
+    s.lastPT=Date.now();
+    if(!isReal(e))return;
+    var el=(e.target).closest(SEL);
+    if(el){s.downEl=el;s.upOk=false;}
+  },true);
+  document.addEventListener('pointerup',function(e){
+    if(s.downEl&&(e.target).closest(SEL)===s.downEl)s.upOk=true;
+  },true);
+  document.addEventListener('pointermove',function(){s.lastPT=Date.now();},true);
+  document.addEventListener('click',function(e){
+    var el=(e.target).closest(SEL);
+    if(!el){s.downEl=null;s.upOk=false;return;}
+    var ok=s.downEl===el&&s.upOk;
+    s.downEl=null;s.upOk=false;
+    if(!ok){e.preventDefault();e.stopImmediatePropagation();}
+  },true);
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Enter'&&e.key!==' ')return;
+    var el=e.target.closest&&e.target.closest(SEL);
+    if(!el)return;
+    if(Date.now()-s.lastPT<PT_KEY_MS){e.preventDefault();e.stopImmediatePropagation();}
+  },true);
+})()`} />
       </head>
       <body>
         {/* Skip link for keyboard users (accessibility) */}

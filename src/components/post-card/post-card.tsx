@@ -248,21 +248,6 @@ export const PostCard = component$<PostCardProps>(({
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
-      onPointerDownCapture$={() => {
-        cardReceivedPointerDown.value = true;
-        cardReceivedPointerUp.value = false;
-      }}
-      onPointerUpCapture$={() => {
-        if (cardReceivedPointerDown.value) cardReceivedPointerUp.value = true;
-      }}
-      onPointerLeave$={() => {
-        cardReceivedPointerDown.value = false;
-        cardReceivedPointerUp.value = false;
-      }}
-      onPointerCancel$={() => {
-        cardReceivedPointerDown.value = false;
-        cardReceivedPointerUp.value = false;
-      }}
       onClick$={(e) => {
         const ev = e as MouseEvent;
         ev.preventDefault();

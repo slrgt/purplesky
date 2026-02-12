@@ -31,12 +31,9 @@ const routeSyncState = { done: false };
 /** Shared flag so scroll save skips history.replaceState during programmatic scroll restore (avoids "Too many Location/History API calls"). */
 const scrollRestoreState = { restoring: false };
 
-/** Guard: only allow link/button activation after a real pointer down+up on the same element (stops hover-triggered phantom clicks). */
-const clickGuardState = { pointerDownEl: null as Element | null, pointerUpReceived: false };
-
-/** Last time a pointer event occurred; used to block Enter/Space activating links when focus came from hover. Stored in object to avoid illegal reassignment of import in serialized chunks. */
-const pointerGuardState = { lastPointerTime: 0 };
-const POINTER_TO_KEY_MS = 500;
+/** Phantom-click guard (pointerdown/up + click + keydown) is now registered
+ *  as an early inline <script> in root.tsx so it fires before Qwik's event
+ *  delegation. See the dangerouslySetInnerHTML block in root.tsx <head>. */
 
 export default component$(() => {
   const store = useAppProvider();
@@ -152,73 +149,6 @@ export default component$(() => {
       window.removeEventListener('popstate', onPopState);
       if (scrollTimer) clearTimeout(scrollTimer);
       scrollRestoreState.restoring = false;
-    });
-  });
-
-  // ── Phantom-click guard: links/buttons only activate after real pointer down+up on same element ───
-  // Only count pointerdown when it's an actual press (left mouse, touch, or pen). Hover can synthesize
-  // pointer events without a real button, which was letting underlined links fire on hover.
-  useVisibleTask$(({ cleanup }) => {
-    const sel = 'a[href], button';
-    const isRealPointerDown = (e: PointerEvent) =>
-      (e.pointerType === 'mouse' && e.button === 0) ||
-      e.pointerType === 'touch' ||
-      (e.pointerType === 'pen' && e.isPrimary);
-    const onPointerDown = (e: PointerEvent) => {
-      pointerGuardState.lastPointerTime = Date.now();
-      if (!isRealPointerDown(e)) return;
-      const el = (e.target as Element).closest(sel);
-      if (el) {
-        clickGuardState.pointerDownEl = el;
-        clickGuardState.pointerUpReceived = false;
-      }
-    };
-    const onPointerUp = (e: PointerEvent) => {
-      if (clickGuardState.pointerDownEl && (e.target as Element).closest(sel) === clickGuardState.pointerDownEl) {
-        clickGuardState.pointerUpReceived = true;
-      }
-    };
-    const onClick = (e: MouseEvent) => {
-      const interactive = (e.target as Element).closest(sel);
-      if (!interactive) {
-        clickGuardState.pointerDownEl = null;
-        clickGuardState.pointerUpReceived = false;
-        return;
-      }
-      const valid =
-        clickGuardState.pointerDownEl === interactive && clickGuardState.pointerUpReceived;
-      clickGuardState.pointerDownEl = null;
-      clickGuardState.pointerUpReceived = false;
-      if (!valid) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
-    };
-    // Track pointer movement so we know when focus might have come from hover (not just pointerdown)
-    const onPointerMove = () => { pointerGuardState.lastPointerTime = Date.now(); };
-
-    // Block Enter/Space activating a link/button when focus likely came from hover (spurious key or a11y sending key on focus)
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      const interactive = (e.target as Element).closest?.('a[href], button');
-      if (!interactive) return;
-      if (Date.now() - pointerGuardState.lastPointerTime < POINTER_TO_KEY_MS) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
-    };
-
-    document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('pointermove', onPointerMove, true);
-    document.addEventListener('pointerup', onPointerUp, true);
-    document.addEventListener('click', onClick, true);
-    document.addEventListener('keydown', onKeyDown, true);
-    cleanup(() => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('pointermove', onPointerMove, true);
-      document.removeEventListener('pointerup', onPointerUp, true);
-      document.removeEventListener('click', onClick, true);
-      document.removeEventListener('keydown', onKeyDown, true);
     });
   });
 
