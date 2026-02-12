@@ -10,7 +10,7 @@
  * To edit the base path for deployment, change VITE_BASE_PATH env var.
  */
 
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { qwikVite } from '@builder.io/qwik/optimizer';
 import { qwikCity } from '@builder.io/qwik-city/vite';
 import wasm from 'vite-plugin-wasm';
@@ -18,6 +18,47 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 
 const isProd = process.env.NODE_ENV === 'production';
 const base = process.env.VITE_BASE_PATH ?? (isProd ? '/purplesky-1/' : '/');
+
+/**
+ * Vite plugin that rewrites public/manifest.json after the build copies it,
+ * replacing relative "./" references with the actual base path.
+ * This ensures `start_url`, `scope`, and icon paths resolve correctly
+ * on any domain regardless of which page the user installs from.
+ *
+ * Files in `public/` are copied as-is by Vite (they don't go through the
+ * bundle pipeline), so we rewrite the file on disk in `writeBundle`.
+ */
+function pwaManifestPlugin(basePath: string): Plugin {
+  return {
+    name: 'pwa-manifest-base',
+    apply: 'build',
+    async writeBundle(opts) {
+      const outDir = opts.dir;
+      if (!outDir) return;
+      const { readFileSync, writeFileSync, existsSync } = await import('fs');
+      const { join } = await import('path');
+      const manifestPath = join(outDir, 'manifest.json');
+      if (!existsSync(manifestPath)) return;
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        if (manifest.start_url === './' || manifest.start_url === '.') {
+          manifest.start_url = basePath;
+        }
+        if (manifest.scope === './' || manifest.scope === '.') {
+          manifest.scope = basePath;
+        }
+        if (Array.isArray(manifest.icons)) {
+          for (const icon of manifest.icons) {
+            if (typeof icon.src === 'string' && icon.src.startsWith('./')) {
+              icon.src = basePath + icon.src.slice(2);
+            }
+          }
+        }
+        writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+      } catch { /* leave manifest unchanged if parse fails */ }
+    },
+  };
+}
 
 export default defineConfig({
   base,
@@ -28,6 +69,8 @@ export default defineConfig({
     /* WASM plugins: allow importing .wasm as ES modules */
     wasm(),
     topLevelAwait(),
+    /* Rewrite manifest.json with absolute base paths for PWA install */
+    pwaManifestPlugin(base),
   ],
   resolve: {
     alias: {

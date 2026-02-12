@@ -33,12 +33,15 @@ const API_MAX_AGE_MS = 5 * 60 * 1000;
 // Max cached images (to prevent filling storage)
 const MAX_CACHED_IMAGES = 200;
 
-// Static assets to precache on install
+// Derive the base path from the SW scope (works on any domain / subpath)
+const BASE = new URL(self.registration?.scope ?? './', self.location.href).pathname;
+
+// Static assets to precache on install (absolute paths using BASE)
 const PRECACHE_URLS = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon.svg',
+  BASE,
+  `${BASE}index.html`,
+  `${BASE}manifest.json`,
+  `${BASE}icon.svg`,
 ];
 
 // ── Install ───────────────────────────────────────────────────────────────
@@ -113,7 +116,7 @@ async function cacheFirst(request, cacheName) {
   } catch {
     // Return offline fallback for navigation requests
     if (request.mode === 'navigate') {
-      return caches.match('./index.html');
+      return caches.match(`${BASE}index.html`);
     }
     return new Response('Offline', { status: 503 });
   }
@@ -266,8 +269,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'PurpleSky', {
       body: data.body || 'New activity',
-      icon: './icon.svg',
-      badge: './icon.svg',
+      icon: `${BASE}icon.svg`,
+      badge: `${BASE}icon.svg`,
       data: data.url ? { url: data.url } : undefined,
     })
   );

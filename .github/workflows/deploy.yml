@@ -95,10 +95,9 @@ jobs:
           # Disable Jekyll processing (required for serving JS/CSS/JSON files)
           touch "$DEPLOY_DIR/.nojekyll"
 
-          # Ensure PWA assets are present
-          cp public/sw.js "$DEPLOY_DIR/sw.js" 2>/dev/null || true
-          cp public/manifest.json "$DEPLOY_DIR/manifest.json" 2>/dev/null || true
-          cp public/icon.svg "$DEPLOY_DIR/icon.svg" 2>/dev/null || true
+          # Do NOT copy public/manifest.json or public/sw.js here.
+          # The build already emits them with the correct base path for this repo
+          # (so forks get /their-repo-name/ in start_url, scope, and SW scope).
 
           # Generate client-metadata.json for this fork's Pages URL (Bluesky OAuth)
           cat > "$DEPLOY_DIR/client-metadata.json" <<EOJSON

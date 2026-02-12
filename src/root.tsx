@@ -26,8 +26,8 @@ const ServiceWorkerRegisterConditional = component$(() => {
       /Mobi|Android|iPhone|iPad|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
       (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true;
     if (!isStandalone && !isMobile) return;
-    const swUrl = new URL('./sw.js', window.location.href).pathname;
-    navigator.serviceWorker.register(swUrl).catch((e) => console.error('SW register failed:', e));
+    const base = import.meta.env.BASE_URL || '/';
+    navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).catch((e) => console.error('SW register failed:', e));
   });
   return null;
 });
@@ -47,9 +47,9 @@ export default component$(() => {
         {/* App info */}
         <title>PurpleSky</title>
         <meta name="description" content="Bluesky PWA – feeds, forums, consensus, collaboration" />
-        <link rel="manifest" href="./manifest.json" />
-        <link rel="icon" type="image/svg+xml" href="./icon.svg" />
-        <link rel="apple-touch-icon" href="./icon.svg" />
+        <link rel="manifest" href={`${import.meta.env.BASE_URL}manifest.json`} />
+        <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}icon.svg`} />
+        <link rel="apple-touch-icon" href={`${import.meta.env.BASE_URL}icon.svg`} />
       </head>
       <body>
         {/* Skip link for keyboard users (accessibility) */}

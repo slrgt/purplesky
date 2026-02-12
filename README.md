@@ -157,15 +157,19 @@ npm run build
 
 ### Deploy to GitHub Pages
 
-1. Update `public/client-metadata.json` with your GitHub Pages URL
-2. Push to the `main` branch
-3. GitHub Actions will automatically build and deploy
+1. Update `public/client-metadata.json` with your GitHub Pages URL (or let the workflow generate it; see `.github/workflows/deploy.yml`).
+2. Push to the `main` branch.
+3. GitHub Actions will automatically build and deploy.
 
-Or manually:
+**Forking:** If you fork the repo and deploy from your fork, the workflow uses your **repository name** as the base path (`VITE_BASE_PATH=/${{ github.event.repository.name }}/`). So the app and PWA install (e.g. “Add to Home Screen”) will use the correct URL (e.g. `https://yourname.github.io/your-repo-name/`) with no extra config. The manifest `start_url` and `scope` are rewritten at build time to match.
+
+**Custom base path (e.g. self-hosted at a subpath):** Set `VITE_BASE_PATH` when building, e.g. `VITE_BASE_PATH=/my-app/ npm run build`.
+
+Or build manually and upload:
 
 ```bash
 npm run build
-# Upload dist/ to your hosting
+# Upload dist/ to your hosting (or dist/<base-path-segment>/ if using a subpath)
 ```
 
 ## How to Edit
