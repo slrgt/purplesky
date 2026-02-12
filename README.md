@@ -170,6 +170,8 @@ npm run build
 2. Push to the `main` branch.
 3. GitHub Actions will automatically build and deploy.
 
+**No server or database required.** The app runs entirely in the browser: session, preferences, and app data use **localStorage** and **sessionStorage**; the service worker uses **IndexedDB** for offline queues. GitHub Pages only serves static files; all storage is in the user’s browser.
+
 **Forking:** If you fork the repo and deploy from your fork, the workflow uses your **repository name** as the base path (`VITE_BASE_PATH=/${{ github.event.repository.name }}/`). So the app and PWA install (e.g. “Add to Home Screen”) will use the correct URL (e.g. `https://yourname.github.io/your-repo-name/`) with no extra config. The manifest `start_url` and `scope` are rewritten at build time to match.
 
 **Custom base path (e.g. self-hosted at a subpath):** Set `VITE_BASE_PATH` when building, e.g. `VITE_BASE_PATH=/my-app/ npm run build`.

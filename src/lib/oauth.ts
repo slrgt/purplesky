@@ -24,8 +24,8 @@ let client: BrowserOAuthClient | null = null;
 function getAppBaseUrl(): string {
   const u = new URL(window.location.href);
   const base = (typeof import.meta.env !== 'undefined' && import.meta.env?.BASE_URL) || '/';
-  const basePath = base.replace(/\/$/, '') || '';
-  return `${u.origin}${basePath}`;
+  const basePath = base.replace(/\/$/, '').replace(/^\//, '') || '';
+  return basePath ? `${u.origin}/${basePath}` : u.origin;
 }
 
 /** Check if running on localhost (development). */
