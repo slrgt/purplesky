@@ -17,7 +17,7 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 
 const isProd = process.env.NODE_ENV === 'production';
-const base = process.env.VITE_BASE_PATH ?? (isProd ? '/purplesky/' : '/');
+const base = process.env.VITE_BASE_PATH ?? (isProd ? '/purplesky-1/' : '/');
 
 export default defineConfig({
   base,

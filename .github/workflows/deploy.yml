@@ -61,23 +61,26 @@ jobs:
         run: npm ci
 
       # Build the Qwik app (client + SSR with static adapter + lint)
-      # Base path and origin match repo so any repo (e.g. purplesky-1) gets its own Pages URL.
+      # Uses GitHub context so any fork (e.g. slrgt/purplesky-1) gets correct Pages URL automatically.
       - name: Build
         run: npx qwik build
         env:
           CI: true
           NODE_OPTIONS: '--max-old-space-size=4096'
           VITE_BASE_PATH: '/${{ github.event.repository.name }}/'
-          VITE_ORIGIN: 'https://${{ github.event.repository.owner }}.github.io'
+          VITE_ORIGIN: 'https://${{ github.repository_owner }}.github.io'
 
       # Prepare output for GitHub Pages deployment
       # GitHub Pages project sites serve at username.github.io/REPO_NAME/.
       # Build output goes to dist/REPO_NAME/; we upload that folder so paths match.
       - name: Prepare dist
         run: |
+          OWNER="${{ github.repository_owner }}"
           REPO_NAME="${{ github.event.repository.name }}"
+          PAGES_URL="https://${OWNER}.github.io/${REPO_NAME}"
           DEPLOY_DIR="dist/${REPO_NAME}"
 
+          echo "=== Pages URL: ${PAGES_URL} ==="
           echo "=== Contents of $DEPLOY_DIR ==="
           ls -la "$DEPLOY_DIR" || { echo "::error::$DEPLOY_DIR not found"; exit 1; }
 
@@ -96,7 +99,23 @@ jobs:
           cp public/sw.js "$DEPLOY_DIR/sw.js" 2>/dev/null || true
           cp public/manifest.json "$DEPLOY_DIR/manifest.json" 2>/dev/null || true
           cp public/icon.svg "$DEPLOY_DIR/icon.svg" 2>/dev/null || true
-          cp public/client-metadata.json "$DEPLOY_DIR/client-metadata.json" 2>/dev/null || true
+
+          # Generate client-metadata.json for this fork's Pages URL (Bluesky OAuth)
+          cat > "$DEPLOY_DIR/client-metadata.json" <<EOJSON
+          {
+            "client_id": "${PAGES_URL}/client-metadata.json",
+            "client_name": "PurpleSky",
+            "client_uri": "${PAGES_URL}/",
+            "redirect_uris": ["${PAGES_URL}/"],
+            "scope": "atproto transition:generic rpc:app.bsky.feed.getFeed?aud=did:web:api.bsky.app%23bsky_appview",
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "application_type": "web",
+            "dpop_bound_access_tokens": true
+          }
+          EOJSON
+          echo "Generated client-metadata.json for ${PAGES_URL}"
 
           echo "=== Final contents ==="
           ls -la "$DEPLOY_DIR"

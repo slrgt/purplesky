@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
-const basePath = process.env.VITE_BASE_PATH || '/purplesky/';
+const basePath = process.env.VITE_BASE_PATH || '/purplesky-1/';
 const clientDir = join(root, 'dist', basePath.replace(/^\/|\/$/g, ''));
 const outDir = join(root, 'dist');
 

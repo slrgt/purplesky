@@ -12,8 +12,8 @@ import { staticAdapter } from '@builder.io/qwik-city/adapters/static/vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 
-const base = process.env.VITE_BASE_PATH ?? '/purplesky/';
-const origin = process.env.VITE_ORIGIN ?? 'https://x1nn1x.github.io';
+const base = process.env.VITE_BASE_PATH ?? '/purplesky-1/';
+const origin = process.env.VITE_ORIGIN ?? 'https://slrgt.github.io';
 
 export default defineConfig({
   base,
