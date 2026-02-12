@@ -23,7 +23,6 @@ import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
 import { Link, useLocation } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
-import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
 import { FollowBell } from '~/components/follow-bell/follow-bell';
 import { RichText } from '~/components/rich-text/rich-text';
 import { withBase } from '~/lib/path';
@@ -243,13 +242,13 @@ export default component$(() => {
       <article class="glass-strong" style={{ padding: 'var(--space-xl)', marginBottom: 'var(--space-lg)' }}>
         {/* Author */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
-          <FollowAvatar
-            authorDid={p.author.did}
-            followUri={(p.author as { viewer?: { following?: string } }).viewer?.following}
-            profilePath={withBase(`/profile/${encodeURIComponent(p.author.handle)}/`)}
-            avatarUrl={p.author.avatar ? resizedAvatarUrl(p.author.avatar, 40) : undefined}
-            size={40}
-          />
+          <Link href={withBase(`/profile/${encodeURIComponent(p.author.handle)}/`)} style={{ display: 'block', flexShrink: 0 }}>
+            {p.author.avatar ? (
+              <img src={resizedAvatarUrl(p.author.avatar, 40)} alt="" width={40} height={40} style={{ borderRadius: '50%', display: 'block' }} loading="lazy" />
+            ) : (
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--border)' }} />
+            )}
+          </Link>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: '600' }}>{p.author.displayName || p.author.handle}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
@@ -517,13 +516,13 @@ export default component$(() => {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ padding: 'var(--space-xs) 0 var(--space-xs) var(--space-sm)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
-                        <FollowAvatar
-                          authorDid={rp.author.did}
-                          followUri={(rp.author as { viewer?: { following?: string } }).viewer?.following}
-                          profilePath={withBase(`/profile/${encodeURIComponent(rp.author.handle)}/`)}
-                          avatarUrl={rp.author.avatar ? resizedAvatarUrl(rp.author.avatar, 24) : undefined}
-                          size={24}
-                        />
+                        <Link href={withBase(`/profile/${encodeURIComponent(rp.author.handle)}/`)} style={{ display: 'block', flexShrink: 0 }}>
+                          {rp.author.avatar ? (
+                            <img src={resizedAvatarUrl(rp.author.avatar, 24)} alt="" width={24} height={24} style={{ borderRadius: '50%', display: 'block' }} loading="lazy" />
+                          ) : (
+                            <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--border)' }} />
+                          )}
+                        </Link>
                         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
                           {rp.author.displayName && (
                             <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>{rp.author.displayName}</span>

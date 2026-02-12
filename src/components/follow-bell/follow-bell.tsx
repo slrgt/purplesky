@@ -73,7 +73,7 @@ interface FollowBellProps {
   authorDid?: string;
   /** Current follow record URI if already following (undefined = not following) */
   followUri?: string;
-  /** When true, follow is on the avatar (FollowAvatar) so don't show follow button here */
+  /** When true, don't show follow button (e.g. when avatar is the main profile link) */
   followOnAvatar?: boolean;
   /** 'profile' = text "Follow"/"Following" button only (for profile page) */
   variant?: 'inline' | 'profile';

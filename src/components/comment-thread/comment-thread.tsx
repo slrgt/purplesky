@@ -23,7 +23,6 @@ import type { ForumReply } from '~/lib/types';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import { withBase } from '~/lib/path';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
-import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
 import { FollowBell } from '~/components/follow-bell/follow-bell';
 import { RichText } from '~/components/rich-text/rich-text';
 import { Link } from '@builder.io/qwik-city';
@@ -170,13 +169,13 @@ const CommentNode = component$<{
           <div style={{ padding: 'var(--space-xs) 0 var(--space-xs) var(--space-sm)' }}>
             {/* Author row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
-              <FollowAvatar
-                authorDid={reply.author.did}
-                followUri={(reply.author as { viewer?: { following?: string } }).viewer?.following}
-                profilePath={withBase(`/profile/${encodeURIComponent(reply.author.handle)}/`)}
-                avatarUrl={reply.author.avatar ? resizedAvatarUrl(reply.author.avatar, 20) : undefined}
-                size={20}
-              />
+              <Link href={withBase(`/profile/${encodeURIComponent(reply.author.handle)}/`)} style={{ display: 'block', flexShrink: 0 }}>
+                {reply.author.avatar ? (
+                  <img src={resizedAvatarUrl(reply.author.avatar, 20)} alt="" width={20} height={20} style={{ borderRadius: '50%', display: 'block' }} loading="lazy" />
+                ) : (
+                  <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--border)' }} />
+                )}
+              </Link>
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
                 {reply.author.displayName && (
                   <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>{reply.author.displayName}</span>

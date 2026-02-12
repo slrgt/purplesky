@@ -225,13 +225,13 @@ body {
   outline-offset: 2px;
 }
 
-/* ── Links (only clickable links get underline) ──────────────────────────── */
+/* ── Links (no underline) ───────────────────────────────────────────────── */
 a {
   color: var(--accent);
   text-decoration: none;
 }
 a[href]:hover {
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */

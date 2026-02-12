@@ -26,7 +26,6 @@ import type { TimelineItem, CardViewMode } from '~/lib/types';
 import { withBase } from '~/lib/path';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
-import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
 import { FollowBell } from '~/components/follow-bell/follow-bell';
 import { RichText } from '~/components/rich-text/rich-text';
 
@@ -205,28 +204,79 @@ export const PostCard = component$<PostCardProps>(({
   const profilePath = withBase(`/profile/${encodeURIComponent(post.author.handle)}/`);
 
   const showNsfwOverlay = nsfwBlurred;
-  /** Only navigate when click was preceded by pointerdown on this card (avoids hover-synthesized taps). */
+  /** Require full press (pointerdown + pointerup) on this card to avoid phantom clicks from hover/move. */
   const cardReceivedPointerDown = useSignal(false);
+  const cardReceivedPointerUp = useSignal(false);
+
+  // ── Synchronous pointer tracking (prevents hover-triggered clicks) ───────
+  // Qwik's onClick$/onPointerDownCapture$ run asynchronously, so the click handler can run before
+  // pointerdown/up state is updated, causing hover or movement to be treated as a click. Native
+  // listeners run in the same tick as the event, so state is correct when the async handler runs.
+  useVisibleTask$(({ cleanup }) => {
+    const el = cardRef.value;
+    if (!el) return;
+    const isRealPointerDown = (e: PointerEvent) =>
+      (e.pointerType === 'mouse' && e.button === 0) ||
+      e.pointerType === 'touch' ||
+      (e.pointerType === 'pen' && e.isPrimary);
+    const onPointerDown = (e: PointerEvent) => {
+      if (!isRealPointerDown(e)) return;
+      cardReceivedPointerDown.value = true;
+      cardReceivedPointerUp.value = false;
+    };
+    const onPointerUp = () => {
+      if (cardReceivedPointerDown.value) cardReceivedPointerUp.value = true;
+    };
+    const onPointerLeaveOrCancel = () => {
+      cardReceivedPointerDown.value = false;
+      cardReceivedPointerUp.value = false;
+    };
+    el.addEventListener('pointerdown', onPointerDown, true);
+    el.addEventListener('pointerup', onPointerUp, true);
+    el.addEventListener('pointerleave', onPointerLeaveOrCancel, true);
+    el.addEventListener('pointercancel', onPointerLeaveOrCancel, true);
+    cleanup(() => {
+      el.removeEventListener('pointerdown', onPointerDown, true);
+      el.removeEventListener('pointerup', onPointerUp, true);
+      el.removeEventListener('pointerleave', onPointerLeaveOrCancel, true);
+      el.removeEventListener('pointercancel', onPointerLeaveOrCancel, true);
+    });
+  });
 
   return (
     <article
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
-      onPointerDownCapture$={() => { cardReceivedPointerDown.value = true; }}
-      onPointerLeave$={() => { cardReceivedPointerDown.value = false; }}
+      onPointerDownCapture$={() => {
+        cardReceivedPointerDown.value = true;
+        cardReceivedPointerUp.value = false;
+      }}
+      onPointerUpCapture$={() => {
+        if (cardReceivedPointerDown.value) cardReceivedPointerUp.value = true;
+      }}
+      onPointerLeave$={() => {
+        cardReceivedPointerDown.value = false;
+        cardReceivedPointerUp.value = false;
+      }}
+      onPointerCancel$={() => {
+        cardReceivedPointerDown.value = false;
+        cardReceivedPointerUp.value = false;
+      }}
       onClick$={(e) => {
         const ev = e as MouseEvent;
         ev.preventDefault();
         ev.stopPropagation();
         if (!ev.isTrusted) return;
-        if (!cardReceivedPointerDown.value) return;
+        if (!cardReceivedPointerDown.value || !cardReceivedPointerUp.value) return;
         const target = ev.target as HTMLElement | null;
         if (target?.closest?.('button, a[href], [data-action]')) {
           cardReceivedPointerDown.value = false;
+          cardReceivedPointerUp.value = false;
           return;
         }
         cardReceivedPointerDown.value = false;
+        cardReceivedPointerUp.value = false;
         nav(postPathForNav); // full path with base so GitHub Pages stays under /repo/
       }}
     >
@@ -277,7 +327,7 @@ export const PostCard = component$<PostCardProps>(({
                 onClick$={(e) => { e.preventDefault(); onNsfwUnblur$?.(); }}
                 role="button"
                 tabIndex={0}
-                onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNsfwUnblur$?.(); } }}
+                onKeyDown$={(e) => { if (e.key === 'Enter') { e.preventDefault(); onNsfwUnblur$?.(); } }}
               >
                 <span>Sensitive Content</span>
                 <small>Tap to reveal</small>
@@ -291,13 +341,13 @@ export const PostCard = component$<PostCardProps>(({
       {(cardViewMode === 'full' || cardViewMode === 'art') && (
         <div class="post-meta">
           <span onClick$={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center' }}>
-            <FollowAvatar
-            authorDid={post.author.did}
-            followUri={(post.author as { viewer?: { following?: string } }).viewer?.following}
-            profilePath={profilePath}
-            avatarUrl={post.author.avatar ? resizedAvatarUrl(post.author.avatar, 24) : undefined}
-            size={24}
-          />
+            <Link href={profilePath} style={{ display: 'block', flexShrink: 0 }}>
+              {post.author.avatar ? (
+                <img src={resizedAvatarUrl(post.author.avatar, 24)} alt="" width={24} height={24} style={{ borderRadius: '50%', display: 'block' }} loading="lazy" />
+              ) : (
+                <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--border)' }} />
+              )}
+            </Link>
           </span>
           <Link href={profilePath} class="post-author post-author-selectable" style={{ flex: 1, minWidth: 0 }} onClick$={(e) => e.stopPropagation()}>
             <span class="post-handle truncate">
@@ -336,13 +386,13 @@ export const PostCard = component$<PostCardProps>(({
       {cardViewMode === 'mini' && (
         <div class="post-meta post-meta-mini">
           <span onClick$={(e) => e.stopPropagation()}>
-          <FollowAvatar
-            authorDid={post.author.did}
-            followUri={(post.author as { viewer?: { following?: string } }).viewer?.following}
-            profilePath={profilePath}
-            avatarUrl={post.author.avatar ? resizedAvatarUrl(post.author.avatar, 20) : undefined}
-            size={20}
-          />
+            <Link href={profilePath} style={{ display: 'block', flexShrink: 0 }}>
+              {post.author.avatar ? (
+                <img src={resizedAvatarUrl(post.author.avatar, 20)} alt="" width={20} height={20} style={{ borderRadius: '50%', display: 'block' }} loading="lazy" />
+              ) : (
+                <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--border)' }} />
+              )}
+            </Link>
           </span>
           <Link href={profilePath} class="post-author post-author-selectable" style={{ flex: 1, minWidth: 0 }} onClick$={(e) => e.stopPropagation()}>
             <span class="post-handle truncate">{post.author.handle}</span>
