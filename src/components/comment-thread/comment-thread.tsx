@@ -22,10 +22,16 @@ import { component$, useSignal, $ } from '@builder.io/qwik';
 import type { ForumReply } from '~/lib/types';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
+import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
+import { FollowBell } from '~/components/follow-bell/follow-bell';
+import { RichText } from '~/components/rich-text/rich-text';
+import { Link } from '@builder.io/qwik-city';
+
+import './comment-thread.css';
 
 const MAX_DEPTH = 5;
 
-export type CommentSortMode = 'newest' | 'oldest' | 'best' | 'controversial';
+export type CommentSortMode = 'newest' | 'oldest' | 'best' | 'controversial' | 'replies';
 
 interface CommentThreadProps {
   replies: ForumReply[];
@@ -61,18 +67,20 @@ export const CommentThread = component$<CommentThreadProps>(
       const ratio = likes / total;
       return total * (1 - 2 * Math.abs(ratio - 0.5));
     };
+    const getReplyCount = (r: ForumReply) => replies.filter((c) => c.replyTo === r.uri).length;
     levelReplies = [...levelReplies].sort((a, b) => {
       if (sortOrder === 'newest') return getCreated(b).localeCompare(getCreated(a));
       if (sortOrder === 'oldest') return getCreated(a).localeCompare(getCreated(b));
       if (sortOrder === 'best') return getScore(b) - getScore(a);
       if (sortOrder === 'controversial') return getControversy(b) - getControversy(a);
+      if (sortOrder === 'replies') return getReplyCount(b) - getReplyCount(a);
       return 0;
     });
 
     if (levelReplies.length === 0) return null;
 
     return (
-      <div style={{ paddingLeft: depth > 0 ? `${Math.min(depth, MAX_DEPTH) * 16}px` : '0' }}>
+      <div>
         {levelReplies.map((reply) => (
           <CommentNode
             key={reply.uri}
@@ -135,87 +143,123 @@ const CommentNode = component$<{
   });
 
   return (
-    <div style={{
-      borderLeft: depth > 0 ? '2px solid var(--border)' : 'none',
-      marginBottom: 'var(--space-sm)',
-    }}>
-      <div class="glass" style={{ padding: 'var(--space-sm) var(--space-md)' }}>
-        {/* Author row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
-          {reply.author.avatar && (
-            <img src={resizedAvatarUrl(reply.author.avatar, 20)} alt="" width="20" height="20" style={{ borderRadius: '50%' }} />
-          )}
-          <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>
-            @{reply.author.handle}
-          </span>
-          <span style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>{timeAgo}</span>
-
-          {/* Collapse toggle */}
-          {childCount > 0 && (
-            <button
-              style={{ fontSize: 'var(--font-xs)', color: 'var(--accent)', marginLeft: 'auto', minWidth: 'auto', minHeight: 'auto', padding: '2px 6px' }}
-              onClick$={() => { collapsed.value = !collapsed.value; }}
-            >
-              {collapsed.value ? `[+${childCount}]` : '[-]'}
-            </button>
-          )}
-        </div>
-
-        {/* Reply text */}
-        <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {reply.record?.text}
-        </p>
-
-        {/* Actions: Like, Downvote, Reply (reusable ActionBar) */}
-        <div style={{ marginTop: 'var(--space-xs)' }}>
-          <ActionBar
-            subjectUri={reply.uri}
-            subjectCid={reply.cid}
-            likeCount={reply.likeCount ?? 0}
-            liked={!!reply.viewer?.like}
-            likeRecordUri={reply.viewer?.like}
-            downvoteCount={downvoteCounts[reply.uri] ?? 0}
-            downvoted={!!myDownvoteUris[reply.uri]}
-            downvoteRecordUri={myDownvoteUris[reply.uri]}
-            onDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'downvote'); }) : undefined}
-            onUndoDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'undo'); }) : undefined}
-            replyCount={childCount}
-            replyHref={depth >= MAX_DEPTH ? `/forum/${encodeURIComponent(postUri)}/` : undefined}
-            onReplyClick$={depth < MAX_DEPTH ? () => { showReply.value = !showReply.value; } : undefined}
-            compact
+    <div class="ct-node" style={{ marginBottom: 'var(--space-xs)' }}>
+      {/* Two-column layout: left gutter (collapse) | right content */}
+      <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
+        {/* ── Left gutter: collapse button + full-height bar ── */}
+        <div class="ct-gutter">
+          <button
+            type="button"
+            class="ct-collapse-btn"
+            onClick$={() => { collapsed.value = !collapsed.value; }}
+            aria-label={collapsed.value ? `Expand ${childCount} replies` : 'Collapse thread'}
+          >
+            {collapsed.value ? '+' : '\u2013'}
+          </button>
+          <button
+            type="button"
+            class="ct-collapse-bar"
+            onClick$={() => { collapsed.value = !collapsed.value; }}
+            aria-label={collapsed.value ? 'Expand thread' : 'Collapse thread'}
           />
         </div>
 
-        {/* Inline reply form */}
-        {showReply.value && (
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
-            <input
-              type="text"
-              placeholder="Write a reply..."
-              value={replyText.value}
-              onInput$={(_, el) => { replyText.value = el.value; }}
-              style={{ flex: 1, fontSize: 'var(--font-sm)', padding: '4px 8px' }}
-            />
-            <button class="btn" style={{ fontSize: 'var(--font-xs)', padding: '4px 10px' }} onClick$={handleSubmitReply}>
-              Reply
-            </button>
-          </div>
-        )}
-      </div>
+        {/* ── Right content ── */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ padding: 'var(--space-xs) 0 var(--space-xs) var(--space-sm)' }}>
+            {/* Author row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
+              <FollowAvatar
+                authorDid={reply.author.did}
+                followUri={(reply.author as { viewer?: { following?: string } }).viewer?.following}
+                profilePath={`/profile/${encodeURIComponent(reply.author.handle)}/`}
+                avatarUrl={reply.author.avatar ? resizedAvatarUrl(reply.author.avatar, 20) : undefined}
+                size={20}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
+                {reply.author.displayName && (
+                  <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>{reply.author.displayName}</span>
+                )}
+                <Link href={`/profile/${encodeURIComponent(reply.author.handle)}/`} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{reply.author.handle}</Link>
+              </div>
+              <FollowBell
+                authorDid={reply.author.did}
+                followUri={(reply.author as { viewer?: { following?: string } }).viewer?.following}
+                followOnAvatar
+                bellKind="comment"
+                bellTarget={reply.uri}
+                compact
+              />
+              <span style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>{timeAgo}</span>
+              {collapsed.value && childCount > 0 && (
+                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--accent)', marginLeft: 'auto' }}>
+                  +{childCount} {childCount === 1 ? 'reply' : 'replies'}
+                </span>
+              )}
+            </div>
 
-      {/* Nested children */}
-      {!collapsed.value && childCount > 0 && (
-        <CommentThread
-          replies={allReplies}
-          postUri={postUri}
-          parentUri={reply.uri}
-          depth={depth + 1}
-          sortOrder={sortOrder}
-          downvoteCounts={downvoteCounts}
-          myDownvoteUris={myDownvoteUris}
-          onDownvoteChange$={onDownvoteChange$}
-        />
-      )}
+            {/* Collapsed: hide body */}
+            {!collapsed.value && (
+              <>
+                {/* Reply text */}
+                <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5' }}>
+                  <RichText text={reply.record?.text ?? ''} />
+                </p>
+
+                {/* Actions: Like, Downvote, Reply (reusable ActionBar) */}
+                <div style={{ marginTop: 'var(--space-xs)' }}>
+                  <ActionBar
+                    subjectUri={reply.uri}
+                    subjectCid={reply.cid}
+                    likeCount={reply.likeCount ?? 0}
+                    liked={!!reply.viewer?.like}
+                    likeRecordUri={reply.viewer?.like}
+                    downvoteCount={downvoteCounts[reply.uri] ?? 0}
+                    downvoted={!!myDownvoteUris[reply.uri]}
+                    downvoteRecordUri={myDownvoteUris[reply.uri]}
+                    onDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'downvote'); }) : undefined}
+                    onUndoDownvote$={onDownvoteChange$ ? $(() => { onDownvoteChange$(reply.uri, 'undo'); }) : undefined}
+                    replyCount={childCount}
+                    replyHref={depth >= MAX_DEPTH ? `/forum/${encodeURIComponent(postUri)}/` : undefined}
+                    onReplyClick$={depth < MAX_DEPTH ? () => { showReply.value = !showReply.value; } : undefined}
+                    compact
+                  />
+                </div>
+
+                {/* Inline reply form */}
+                {showReply.value && (
+                  <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
+                    <input
+                      type="text"
+                      placeholder="Write a reply..."
+                      value={replyText.value}
+                      onInput$={(_, el) => { replyText.value = el.value; }}
+                      style={{ flex: 1, fontSize: 'var(--font-sm)', padding: '4px 8px' }}
+                    />
+                    <button class="btn" style={{ fontSize: 'var(--font-xs)', padding: '4px 10px' }} onClick$={handleSubmitReply}>
+                      Reply
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Nested children */}
+          {!collapsed.value && childCount > 0 && (
+            <CommentThread
+              replies={allReplies}
+              postUri={postUri}
+              parentUri={reply.uri}
+              depth={depth + 1}
+              sortOrder={sortOrder}
+              downvoteCounts={downvoteCounts}
+              myDownvoteUris={myDownvoteUris}
+              onDownvoteChange$={onDownvoteChange$}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 });

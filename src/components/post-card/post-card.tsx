@@ -21,10 +21,13 @@
  */
 
 import { component$, useSignal, useVisibleTask$, type QRL } from '@builder.io/qwik';
-import { Link } from '@builder.io/qwik-city';
+import { Link, useNavigate } from '@builder.io/qwik-city';
 import type { TimelineItem, CardViewMode } from '~/lib/types';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
+import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
+import { FollowBell } from '~/components/follow-bell/follow-bell';
+import { RichText } from '~/components/rich-text/rich-text';
 
 import './post-card.css';
 
@@ -77,17 +80,21 @@ export const PostCard = component$<PostCardProps>(({
   const post = item.post;
   const record = post.record as { text?: string; createdAt?: string };
   const cardRef = useSignal<HTMLElement>();
+  const nav = useNavigate();
   const showCollectionDropdown = useSignal(false);
   const isDownvoted = useSignal(!!myDownvoteUri);
 
   // ── Extract media from embed ──────────────────────────────────────────
   const embed = post.embed as Record<string, unknown> | undefined;
   const mediaType = embed?.$type as string | undefined;
-  const isImage = mediaType === 'app.bsky.embed.images#view';
-  const isVideo = mediaType === 'app.bsky.embed.video#view';
+  const mediaEmbed = embed?.media as Record<string, unknown> | undefined;
+  const isImage = mediaType === 'app.bsky.embed.images#view' || (mediaEmbed?.$type as string) === 'app.bsky.embed.images#view';
+  const isVideo = mediaType === 'app.bsky.embed.video#view' || (mediaEmbed?.$type as string) === 'app.bsky.embed.video#view';
   const images = (embed?.images as Array<{ thumb: string; fullsize: string; aspectRatio?: { width: number; height: number } }>) ?? [];
-  const videoThumb = embed?.thumbnail as string | undefined;
+  const videoThumb = (embed?.thumbnail as string) ?? (mediaEmbed?.thumbnail as string) ?? undefined;
+  const videoPlaylist = (embed?.playlist as string) ?? (mediaEmbed?.playlist as string) ?? undefined;
   const hasMedia = isImage || isVideo || !!(embed?.media as Record<string, unknown>);
+  const videoRef = useSignal<HTMLVideoElement>();
 
   // Check NSFW
   const nsfwVals = new Set(['porn', 'sexual', 'nudity', 'graphic-media']);
@@ -133,6 +140,50 @@ export const PostCard = component$<PostCardProps>(({
     cleanup(() => observer.disconnect());
   });
 
+  // ── Video autoplay when card is in view (feed cards) ───────────────────
+  useVisibleTask$(async ({ track, cleanup }) => {
+    track(() => videoRef.value);
+    track(() => videoPlaylist);
+    track(() => cardRef.value);
+    if (!isVideo || !videoPlaylist || !cardRef.value) return;
+    const videoEl = videoRef.value;
+    if (!videoEl) return;
+    let hlsInstance: import('hls.js').default | null = null;
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        const entry = entries[0];
+        if (!entry || !videoEl) return;
+        if (entry.isIntersecting) {
+          if (hlsInstance) return;
+          videoEl.muted = true;
+          const Hls = (await import('hls.js')).default;
+          if (Hls.isSupported()) {
+            hlsInstance = new Hls();
+            hlsInstance.loadSource(videoPlaylist);
+            hlsInstance.attachMedia(videoEl);
+            hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { videoEl.play().catch(() => {}); });
+          } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+            videoEl.src = videoPlaylist;
+            videoEl.load();
+            videoEl.addEventListener('loadeddata', () => videoEl.play().catch(() => {}), { once: true });
+          }
+        } else {
+          videoEl.pause();
+          if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+          }
+        }
+      },
+      { rootMargin: '50px', threshold: 0.1 },
+    );
+    observer.observe(cardRef.value);
+    cleanup(() => {
+      observer.disconnect();
+      if (hlsInstance) hlsInstance.destroy();
+    });
+  });
+
   // ── Time ago formatting ─────────────────────────────────────────────────
   const timeAgo = (() => {
     if (!record?.createdAt) return '';
@@ -157,31 +208,50 @@ export const PostCard = component$<PostCardProps>(({
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
+      onClick$={() => nav(postPath)}
+      role="button"
+      tabIndex={0}
+      onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(postPath); } }}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}
       {hasMedia && (
-        <Link href={postPath} class="post-media-link">
+        <div class="post-media-link post-media-wrap-outer">
           <div class="post-media-wrap">
             {isImage && images.length > 0 && (
-              <>
-                <img
-                  src={images[0].fullsize ?? images[0].thumb}
-                  alt=""
-                  class="post-media-img"
-                  loading="lazy"
-                  style={images[0].aspectRatio
-                    ? { aspectRatio: `${images[0].aspectRatio.width} / ${images[0].aspectRatio.height}` }
-                    : undefined}
-                />
-                {images.length > 1 && (
-                  <span class="post-media-count">{images.length}</span>
-                )}
-              </>
+              <div class={`post-media-stack ${images.length > 1 ? 'image-stack-viewport' : ''}`}>
+                {images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img.fullsize ?? img.thumb}
+                    alt={(img as { alt?: string }).alt ?? ''}
+                    class="post-media-img"
+                    loading={i === 0 ? 'lazy' : undefined}
+                    style={img.aspectRatio
+                      ? { aspectRatio: `${img.aspectRatio.width} / ${img.aspectRatio.height}` }
+                      : undefined}
+                  />
+                ))}
+              </div>
             )}
-            {isVideo && videoThumb && (
+            {isVideo && (
               <div class="post-video-wrap">
-                <img src={videoThumb} alt="" class="post-media-img" loading="lazy" />
-                <div class="post-video-play">▶</div>
+                {videoPlaylist ? (
+                  <video
+                    ref={videoRef}
+                    class="post-media-img post-card-video"
+                    muted
+                    loop
+                    playsInline
+                    autoPlay
+                    poster={videoThumb}
+                    style={{ width: '100%', maxHeight: '500px', objectFit: 'contain', background: '#000' }}
+                  />
+                ) : videoThumb ? (
+                  <>
+                    <img src={videoThumb} alt="" class="post-media-img" loading="lazy" />
+                    <div class="post-video-play">▶</div>
+                  </>
+                ) : null}
               </div>
             )}
             {showNsfwOverlay && (
@@ -197,50 +267,82 @@ export const PostCard = component$<PostCardProps>(({
               </div>
             )}
           </div>
-        </Link>
+        </div>
       )}
 
       {/* ── Author Row (hidden in mini except inline) ──────────────────── */}
       {(cardViewMode === 'full' || cardViewMode === 'art') && (
         <div class="post-meta">
-          <Link href={profilePath} class="post-author">
-            {post.author.avatar && (
-              <img src={resizedAvatarUrl(post.author.avatar, 24)} alt="" class="post-avatar" width="24" height="24" loading="lazy" />
-            )}
+          <span onClick$={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center' }}>
+            <FollowAvatar
+            authorDid={post.author.did}
+            followUri={(post.author as { viewer?: { following?: string } }).viewer?.following}
+            profilePath={profilePath}
+            avatarUrl={post.author.avatar ? resizedAvatarUrl(post.author.avatar, 24) : undefined}
+            size={24}
+          />
+          </span>
+          <Link href={profilePath} class="post-author post-author-selectable" style={{ flex: 1, minWidth: 0 }} onClick$={(e) => e.stopPropagation()}>
             <span class="post-handle truncate">
               {post.author.displayName || post.author.handle}
             </span>
           </Link>
+          <span onClick$={(e) => e.stopPropagation()}>
+          <FollowBell
+            authorDid={post.author.did}
+            followUri={(post.author as { viewer?: { following?: string } }).viewer?.following}
+            followOnAvatar
+            bellKind="user"
+            bellTarget={post.author.did}
+            compact
+          />
+          </span>
           <span class="post-time">{timeAgo}</span>
         </div>
       )}
 
       {/* ── Text (full: full snippet; art: one line; mini: skip) ────────── */}
       {record?.text && cardViewMode !== 'mini' && (
-        <Link href={postPath} class="post-text-link">
-          <p class={`post-text ${cardViewMode === 'art' ? 'post-text-art' : ''}`}>
-            {cardViewMode === 'art'
+        <p class={`post-text ${cardViewMode === 'art' ? 'post-text-art' : ''}`}>
+          <RichText
+            text={cardViewMode === 'art'
               ? (record.text.length > 80 ? record.text.slice(0, 80) + '…' : record.text)
               : (record.text.length > 200 ? record.text.slice(0, 200) + '…' : record.text)}
-          </p>
-        </Link>
+          />
+        </p>
       )}
 
       {/* Mini: compact author + time inline */}
       {cardViewMode === 'mini' && (
         <div class="post-meta post-meta-mini">
-          <Link href={profilePath} class="post-author">
-            {post.author.avatar && (
-              <img src={resizedAvatarUrl(post.author.avatar, 20)} alt="" class="post-avatar" width="20" height="20" loading="lazy" />
-            )}
+          <span onClick$={(e) => e.stopPropagation()}>
+          <FollowAvatar
+            authorDid={post.author.did}
+            followUri={(post.author as { viewer?: { following?: string } }).viewer?.following}
+            profilePath={profilePath}
+            avatarUrl={post.author.avatar ? resizedAvatarUrl(post.author.avatar, 20) : undefined}
+            size={20}
+          />
+          </span>
+          <Link href={profilePath} class="post-author post-author-selectable" style={{ flex: 1, minWidth: 0 }} onClick$={(e) => e.stopPropagation()}>
             <span class="post-handle truncate">{post.author.handle}</span>
           </Link>
+          <span onClick$={(e) => e.stopPropagation()}>
+          <FollowBell
+            authorDid={post.author.did}
+            followUri={(post.author as { viewer?: { following?: string } }).viewer?.following}
+            followOnAvatar
+            bellKind="user"
+            bellTarget={post.author.did}
+            compact
+          />
+          </span>
           <span class="post-time">{timeAgo}</span>
         </div>
       )}
 
       {/* ── Action Row (reusable ActionBar + collection) ───────────────── */}
-      <div class="post-actions">
+      <div class="post-actions" onClick$={(e) => e.stopPropagation()}>
         <ActionBar
           subjectUri={post.uri}
           subjectCid={post.cid}

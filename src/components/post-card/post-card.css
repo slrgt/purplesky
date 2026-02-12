@@ -12,6 +12,11 @@
   overflow: hidden;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast),
     opacity var(--transition-fast);
+  cursor: pointer;
+  user-select: none;
+}
+.post-author-selectable {
+  user-select: text;
 }
 
 .post-card:hover {
@@ -52,6 +57,7 @@
 }
 
 /* ── Media ─────────────────────────────────────────────────────────────── */
+.post-media-link.post-media-wrap-outer,
 .post-media-link {
   display: block;
   text-decoration: none;
@@ -64,7 +70,8 @@
   background: var(--surface);
 }
 
-.post-media-img {
+/* Single image: keep existing behavior */
+.post-media-stack:not(.image-stack-viewport) .post-media-img {
   width: 100%;
   height: auto;
   display: block;
@@ -72,16 +79,14 @@
   max-height: 500px;
 }
 
-.post-media-count {
-  position: absolute;
-  top: var(--space-sm);
-  right: var(--space-sm);
-  background: var(--media-control-bg);
-  color: #fff;
-  font-size: var(--font-xs);
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 100px;
+/* Multiple images use .image-stack-viewport from global.css */
+
+.post-media-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  max-height: 500px;
 }
 
 .post-video-wrap {

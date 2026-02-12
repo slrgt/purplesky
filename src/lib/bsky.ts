@@ -35,6 +35,7 @@ const PUBLIC_BSKY = 'https://public.api.bsky.app';
 const SESSION_KEY = 'purplesky-bsky-session';
 const ACCOUNTS_KEY = 'purplesky-accounts';
 const OAUTH_ACCOUNTS_KEY = 'purplesky-oauth-accounts';
+const ACCOUNT_PROFILES_KEY = 'purplesky-account-profiles';
 
 /** Collection name for downvotes (stored in user's repo, syncs via AT Protocol). */
 const DOWNVOTE_COLLECTION = 'app.artsky.feed.downvote';
@@ -48,6 +49,13 @@ type AccountsStore = {
 type OAuthAccountsStore = {
   activeDid: string | null;
   dids: string[];
+};
+
+export type AccountProfile = {
+  did: string;
+  handle: string;
+  avatar?: string;
+  displayName?: string;
 };
 
 // ── Internal State ────────────────────────────────────────────────────────
@@ -166,6 +174,33 @@ export function getOAuthAccountsSnapshot(): OAuthAccountsStore {
   return getOAuthAccounts();
 }
 
+// ── Account Profile Cache ────────────────────────────────────────────────
+
+export function getAccountProfiles(): Record<string, AccountProfile> {
+  try {
+    const raw = localStorage.getItem(ACCOUNT_PROFILES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveAccountProfile(profile: AccountProfile): void {
+  try {
+    const profiles = getAccountProfiles();
+    profiles[profile.did] = profile;
+    localStorage.setItem(ACCOUNT_PROFILES_KEY, JSON.stringify(profiles));
+  } catch { /* ignore */ }
+}
+
+export function removeAccountProfile(did: string): void {
+  try {
+    const profiles = getAccountProfiles();
+    delete profiles[did];
+    localStorage.setItem(ACCOUNT_PROFILES_KEY, JSON.stringify(profiles));
+  } catch { /* ignore */ }
+}
+
 // ── Session Management ────────────────────────────────────────────────────
 
 export function getStoredSession(): AtpSessionData | null {
@@ -220,6 +255,35 @@ export async function logout(): Promise<void> {
     setOAuthAgent(null, null);
   }
   try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+}
+
+/**
+ * Log out a specific account by DID. Removes it from the stored accounts
+ * and profile cache. Returns the next available DID to switch to, or null.
+ */
+export async function logoutAccount(did: string): Promise<string | null> {
+  // If this is the active OAuth agent, sign out the session
+  if (oauthAgentInstance && oauthAgentInstance.did === did && oauthSessionRef) {
+    try { await oauthSessionRef.signOut(); } catch { /* ignore */ }
+    setOAuthAgent(null, null);
+  }
+  // Remove from OAuth accounts list
+  removeOAuthDid(did);
+  removeAccountProfile(did);
+  // Also clean credential sessions
+  const accounts = getAccounts();
+  if (accounts.sessions[did]) {
+    delete accounts.sessions[did];
+    if (accounts.activeDid === did) {
+      const remaining = Object.keys(accounts.sessions);
+      accounts.activeDid = remaining[0] ?? null;
+    }
+    saveAccounts(accounts);
+  }
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  // Return next available DID
+  const oauthAccounts = getOAuthAccounts();
+  return oauthAccounts.activeDid ?? accounts.activeDid;
 }
 
 // ── Timeline & Feeds ──────────────────────────────────────────────────────
@@ -404,24 +468,38 @@ export async function createPost(
   const rt = new RichText({ text: t || '' });
   await rt.detectFacets(agent);
   const res = await agent.post({
-    text: rt.text, facets: rt.facets, embed,
+    text: rt.text, facets: rt.facets, embed: embed as typeof embed & { $type: string },
     createdAt: new Date().toISOString(),
   });
   return { uri: res.uri, cid: res.cid };
 }
 
-/** Reply to a post. Detects @mentions and #hashtags automatically. */
+/** Reply to a post. Detects @mentions and #hashtags automatically. Supports optional image attachments. */
 export async function postReply(
   rootUri: string, rootCid: string,
   parentUri: string, parentCid: string,
   text: string,
+  imageFiles?: File[],
 ): Promise<{ uri: string; cid: string }> {
   const t = text.trim();
-  if (!t) throw new Error('Reply text required');
-  const rt = new RichText({ text: t });
+  const images = (imageFiles ?? []).slice(0, 4);
+  if (!t && !images.length) throw new Error('Reply text or image required');
+
+  let embed: Record<string, unknown> | undefined;
+  if (images.length > 0) {
+    const uploaded = await Promise.all(
+      images.map(async (file) => {
+        const { data } = await agent.uploadBlob(file, { encoding: file.type });
+        return { image: data.blob, alt: '' };
+      }),
+    );
+    embed = { $type: 'app.bsky.embed.images', images: uploaded };
+  }
+
+  const rt = new RichText({ text: t || '' });
   await rt.detectFacets(agent);
   const res = await agent.post({
-    text: rt.text, facets: rt.facets,
+    text: rt.text, facets: rt.facets, embed: embed as typeof embed & { $type: string },
     createdAt: new Date().toISOString(),
     reply: {
       root: { uri: rootUri, cid: rootCid },

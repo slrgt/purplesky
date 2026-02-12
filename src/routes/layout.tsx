@@ -33,6 +33,10 @@ export default component$(() => {
   const showAbout = useSignal(false);
   const accountMenuOpen = useSignal(false);
   const accountWrapRef = useSignal<HTMLElement>();
+  const otherAccounts = useSignal<Array<{ did: string; handle: string; avatar?: string }>>([]);
+  const navSearchOpen = useSignal(false);
+  const navSearchQuery = useSignal('');
+  const navSearchRef = useSignal<HTMLInputElement>();
 
   // Auto-dismiss global toast after 2.5s
   useVisibleTask$(({ track, cleanup }) => {
@@ -230,11 +234,29 @@ export default component$(() => {
         try {
           const { agent } = await import('~/lib/bsky');
           const profile = await agent.getProfile({ actor: session.did });
-          const d = profile.data as { handle?: string; avatar?: string };
+          const d = profile.data as { handle?: string; avatar?: string; displayName?: string };
           store.session.handle = d.handle ?? null;
           store.session.avatar = d.avatar ?? null;
+          // Cache profile for account switcher
+          const { saveAccountProfile } = await import('~/lib/bsky');
+          saveAccountProfile({ did: session.did, handle: d.handle ?? session.did, avatar: d.avatar, displayName: d.displayName });
         } catch { /* ignore */ }
       }
+
+      // Load other accounts for the switcher
+      try {
+        const { getOAuthAccountsSnapshot, getAccountProfiles } = await import('~/lib/bsky');
+        const oauthSnap = getOAuthAccountsSnapshot();
+        const profiles = getAccountProfiles();
+        const currentDid = session?.did;
+        const others = oauthSnap.dids
+          .filter((d: string) => d !== currentDid)
+          .map((d: string) => {
+            const p = profiles[d];
+            return { did: d, handle: p?.handle ?? d.slice(0, 16) + '…', avatar: p?.avatar };
+          });
+        otherAccounts.value = others;
+      } catch { /* ignore */ }
     } catch (err) {
       console.error('Session restore failed:', err);
     }
@@ -251,14 +273,69 @@ export default component$(() => {
     cleanup(() => document.removeEventListener('click', close));
   });
 
-  const onLogout = $(async () => {
-    const { logout } = await import('~/lib/bsky');
-    await logout();
-    store.session.did = null;
-    store.session.handle = null;
-    store.session.avatar = null;
-    store.session.isLoggedIn = false;
+  /** Switch to another logged-in account by DID. */
+  const onSwitchAccount = $(async (did: string) => {
     accountMenuOpen.value = false;
+    try {
+      const { restoreOAuthSession } = await import('~/lib/oauth');
+      const { Agent } = await import('@atproto/api');
+      const session = await restoreOAuthSession(did);
+      if (!session) return;
+      const oauthAgent = new Agent(session);
+      const { setOAuthAgent, setActiveOAuthDid, saveAccountProfile, getOAuthAccountsSnapshot, getAccountProfiles } = await import('~/lib/bsky');
+      setOAuthAgent(oauthAgent, session);
+      setActiveOAuthDid(did);
+      // Update store with new profile
+      store.session.did = did;
+      store.session.isLoggedIn = true;
+      try {
+        const { agent } = await import('~/lib/bsky');
+        const profile = await agent.getProfile({ actor: did });
+        const d = profile.data as { handle?: string; avatar?: string; displayName?: string };
+        store.session.handle = d.handle ?? null;
+        store.session.avatar = d.avatar ?? null;
+        saveAccountProfile({ did, handle: d.handle ?? did, avatar: d.avatar, displayName: d.displayName });
+      } catch { /* ignore */ }
+      // Rebuild other accounts list
+      const oauthSnap = getOAuthAccountsSnapshot();
+      const profiles = getAccountProfiles();
+      otherAccounts.value = oauthSnap.dids
+        .filter((d: string) => d !== did)
+        .map((d: string) => {
+          const p = profiles[d];
+          return { did: d, handle: p?.handle ?? d.slice(0, 16) + '…', avatar: p?.avatar };
+        });
+      // Reload page to refresh feeds for the new account
+      window.location.reload();
+    } catch (err) {
+      console.error('Account switch failed:', err);
+    }
+  });
+
+  /** Log out the current account. If others remain, switch to the next one. */
+  const onLogout = $(async () => {
+    const currentDid = store.session.did;
+    if (!currentDid) return;
+    const { logoutAccount } = await import('~/lib/bsky');
+    const nextDid = await logoutAccount(currentDid);
+    if (nextDid) {
+      // Switch to next account
+      await onSwitchAccount(nextDid);
+    } else {
+      // No accounts left — fully logged out
+      store.session.did = null;
+      store.session.handle = null;
+      store.session.avatar = null;
+      store.session.isLoggedIn = false;
+      otherAccounts.value = [];
+      accountMenuOpen.value = false;
+    }
+  });
+
+  /** Open login modal to add another account. */
+  const onAddAccount = $(() => {
+    accountMenuOpen.value = false;
+    store.showLoginModal = true;
   });
 
   // ── Theme Toggle ────────────────────────────────────────────────────────
@@ -368,8 +445,25 @@ export default component$(() => {
     { href: '/artboards/', label: 'Collections', icon: 'collections' },
   ];
 
+  const pathname = loc.url.pathname;
+  const showBackButton = pathname !== '/' && pathname !== '';
+
   return (
     <div class="app-shell">
+      {/* ── Floating back button (top-left), when on a page we can go back from ── */}
+      {showBackButton && (
+        <button
+          type="button"
+          class="floating-back float-btn"
+          aria-label="Back"
+          onClick$={() => { history.back(); }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+        </button>
+      )}
+
       {/* ── Floating top-right: Account or Login (no top navbar) ───────────── */}
       <div class="floating-top-right" ref={accountWrapRef}>
         {store.session.isLoggedIn ? (
@@ -398,17 +492,70 @@ export default component$(() => {
                 </button>
                 {accountMenuOpen.value && (
                   <div class="account-dropdown glass-strong">
+                    {/* ── Current account ── */}
                     {store.session.handle && (
-                      <Link href={`/profile/${encodeURIComponent(store.session.handle)}/`} onClick$={() => { accountMenuOpen.value = false; }}>
-                        Profile
-                      </Link>
+                      <button
+                        type="button"
+                        class="acct-row acct-current"
+                        onClick$={async () => {
+                          const handle = store.session.handle;
+                          accountMenuOpen.value = false;
+                          if (handle) await nav(`/profile/${encodeURIComponent(handle)}/`);
+                        }}
+                      >
+                        {store.session.avatar ? (
+                          <img src={store.session.avatar} alt="" width="24" height="24" class="acct-avatar" />
+                        ) : (
+                          <span class="acct-avatar-ph">{(store.session.handle ?? '?')[0].toUpperCase()}</span>
+                        )}
+                        <span class="acct-info">
+                          <span class="acct-handle">@{store.session.handle}</span>
+                          <span class="acct-label">View profile</span>
+                        </span>
+                      </button>
                     )}
-                    <Link href="/search/" onClick$={() => { accountMenuOpen.value = false; }}>Search</Link>
+
+                    {/* ── Other accounts ── */}
+                    {otherAccounts.value.length > 0 && (
+                      <div class="acct-section">
+                        <div class="acct-divider" />
+                        {otherAccounts.value.map((acct) => (
+                          <button
+                            key={acct.did}
+                            type="button"
+                            class="acct-row"
+                            onClick$={() => onSwitchAccount(acct.did)}
+                          >
+                            {acct.avatar ? (
+                              <img src={acct.avatar} alt="" width="24" height="24" class="acct-avatar" />
+                            ) : (
+                              <span class="acct-avatar-ph">{(acct.handle ?? '?')[0].toUpperCase()}</span>
+                            )}
+                            <span class="acct-info">
+                              <span class="acct-handle">@{acct.handle}</span>
+                              <span class="acct-label">Switch</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* ── Add account ── */}
+                    <div class="acct-divider" />
+                    <button type="button" onClick$={() => onAddAccount()}>
+                      + Add account
+                    </button>
+
+                    {/* ── Utilities ── */}
+                    <div class="acct-divider" />
                     <button type="button" onClick$={() => { cycleTheme(); accountMenuOpen.value = false; }}>
                       Theme
                     </button>
-                    <button type="button" onClick$={() => onLogout()}>
-                      Log out
+
+                    {/* ── Log out ── */}
+                    <div class="acct-divider" />
+                    <button type="button" class="acct-logout" onClick$={() => onLogout()}>
+                      Log out @{store.session.handle ?? ''}
                     </button>
                   </div>
                 )}
@@ -526,23 +673,84 @@ export default component$(() => {
 
       {/* ── Bottom Navigation (iOS-style floating tab bar) ─────────────── */}
       <nav class="nav glass" aria-label="Main navigation" role="tablist">
-        {navItems.map((item) => {
-          const isActive = loc.url.pathname === item.href ||
-            (item.href !== '/' && loc.url.pathname.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              class={`nav-tab ${isActive ? 'nav-tab-active' : ''}`}
-              role="tab"
-              aria-selected={isActive}
-              aria-label={item.label}
+        {navSearchOpen.value ? (
+          /* ── Expanded search bar ── */
+          <form
+            class="nav-search-bar"
+            preventdefault:submit
+            onSubmit$={async () => {
+              const q = navSearchQuery.value.trim();
+              if (q) {
+                navSearchOpen.value = false;
+                navSearchQuery.value = '';
+                await nav(`/search/?q=${encodeURIComponent(q)}`);
+              }
+            }}
+          >
+            <input
+              ref={navSearchRef}
+              type="text"
+              class="nav-search-input"
+              placeholder="Search…"
+              autoFocus
+              bind:value={navSearchQuery}
+              onKeyDown$={(e) => {
+                if ((e as KeyboardEvent).key === 'Escape') {
+                  navSearchOpen.value = false;
+                  navSearchQuery.value = '';
+                }
+              }}
+            />
+            <button type="submit" class="nav-search-go" aria-label="Search">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="nav-search-close"
+              aria-label="Close search"
+              onClick$={() => { navSearchOpen.value = false; navSearchQuery.value = ''; }}
             >
-              <NavIcon name={item.icon} active={isActive} />
-              <span class="nav-label">{item.label}</span>
-            </Link>
-          );
-        })}
+              ✕
+            </button>
+          </form>
+        ) : (
+          /* ── Normal nav tabs + search button ── */
+          <>
+            {navItems.map((item) => {
+              const isActive = loc.url.pathname === item.href ||
+                (item.href !== '/' && loc.url.pathname.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  class={`nav-tab ${isActive ? 'nav-tab-active' : ''}`}
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-label={item.label}
+                >
+                  <NavIcon name={item.icon} active={isActive} />
+                  <span class="nav-label">{item.label}</span>
+                </Link>
+              );
+            })}
+            <button
+              type="button"
+              class={`nav-tab ${loc.url.pathname.startsWith('/search') ? 'nav-tab-active' : ''}`}
+              role="tab"
+              aria-label="Search"
+              onClick$={() => {
+                navSearchOpen.value = true;
+                // Auto-focus after render
+                setTimeout(() => navSearchRef.value?.focus(), 50);
+              }}
+            >
+              <NavIcon name="search" active={loc.url.pathname.startsWith('/search')} />
+              <span class="nav-label">Search</span>
+            </button>
+          </>
+        )}
       </nav>
 
       {/* ── Login Modal ────────────────────────────────────────────────── */}
@@ -636,6 +844,12 @@ const NavIcon = component$<{ name: string; active: boolean }>(({ name, active })
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} stroke-width={sw}>
           <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
           <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+        </svg>
+      );
+    case 'search':
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} stroke-width={sw}>
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
       );
     default:

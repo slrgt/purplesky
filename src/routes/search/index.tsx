@@ -4,6 +4,7 @@
 
 import { component$, useSignal, useVisibleTask$ } from '@builder.io/qwik';
 import { Link, useLocation } from '@builder.io/qwik-city';
+import { RichText } from '~/components/rich-text/rich-text';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { PostView } from '~/lib/types';
 
@@ -74,7 +75,7 @@ export default component$(() => {
                 )}
                 <div>
                   <div style={{ fontWeight: '600' }}>{a.displayName || a.handle}</div>
-                  <div style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)' }}>@{a.handle}</div>
+                  <Link href={`/profile/${encodeURIComponent(a.handle)}/`} style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', textDecoration: 'none' }}>@{a.handle}</Link>
                 </div>
               </Link>
             ))}
@@ -90,26 +91,29 @@ export default component$(() => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
           {posts.value.map((p) => {
             const rec = p.record as { text?: string };
+            const postHref = `/post/${encodeURIComponent(p.uri)}/`;
             return (
-              <Link
+              <div
                 key={p.uri}
-                href={`/post/${encodeURIComponent(p.uri)}/`}
                 class="glass"
-                style={{ padding: 'var(--space-md)', textDecoration: 'none', color: 'var(--text)' }}
+                style={{ padding: 'var(--space-md)', color: 'var(--text)' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
                   {p.author?.avatar && (
                     <img src={resizedAvatarUrl(p.author.avatar, 24)} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />
                   )}
                   <span style={{ fontWeight: '600' }}>{p.author?.displayName || p.author?.handle}</span>
-                  <span style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>@{p.author?.handle}</span>
+                  {p.author?.handle && (
+                    <Link href={`/profile/${encodeURIComponent(p.author.handle)}/`} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{p.author.handle}</Link>
+                  )}
                 </div>
                 {rec?.text && (
-                  <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
-                    {rec.text.slice(0, 200)}{rec.text.length > 200 ? '…' : ''}
+                  <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5' }}>
+                    <RichText text={rec.text.slice(0, 200) + (rec.text.length > 200 ? '…' : '')} />
                   </p>
                 )}
-              </Link>
+                <Link href={postHref} style={{ fontSize: 'var(--font-xs)', color: 'var(--accent)', marginTop: 'var(--space-xs)', display: 'inline-block' }}>View post</Link>
+              </div>
             );
           })}
         </div>

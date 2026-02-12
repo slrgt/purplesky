@@ -20,7 +20,8 @@
  */
 
 import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
-import { useLocation, useNavigate } from '@builder.io/qwik-city';
+import { Link, useLocation, useNavigate } from '@builder.io/qwik-city';
+import { RichText } from '~/components/rich-text/rich-text';
 import { useAppState } from '~/context/app-context';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
 import { CommentThread } from '~/components/comment-thread/comment-thread';
@@ -45,7 +46,7 @@ export default component$(() => {
   /** Downvote counts per reply/post URI (for sort and display) */
   const replyDownvoteCounts = useSignal<Record<string, number>>({});
   /** Comment sort mode */
-  const commentSortMode = useSignal<'newest' | 'oldest' | 'best' | 'controversial'>('best');
+  const commentSortMode = useSignal<'newest' | 'oldest' | 'best' | 'controversial' | 'replies'>('best');
 
   // Load post, replies, my downvotes, and downvote counts
   useVisibleTask$(async () => {
@@ -169,7 +170,11 @@ export default component$(() => {
           {p.authorAvatar && (
             <img src={p.authorAvatar} alt="" width="28" height="28" style={{ borderRadius: '50%' }} />
           )}
-          <span>@{p.authorHandle ?? p.did}</span>
+          {p.authorHandle ? (
+            <Link href={`/profile/${encodeURIComponent(p.authorHandle)}/`} style={{ color: 'inherit', textDecoration: 'none' }}>@{p.authorHandle}</Link>
+          ) : (
+            <span>@{p.did}</span>
+          )}
           {p.createdAt && <span>{new Date(p.createdAt).toLocaleDateString()}</span>}
         </div>
 
@@ -195,8 +200,8 @@ export default component$(() => {
             </div>
           </div>
         ) : (
-          <div style={{ lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {p.body}
+          <div style={{ lineHeight: '1.7' }}>
+            <RichText text={p.body ?? ''} />
           </div>
         )}
 
@@ -290,6 +295,7 @@ export default component$(() => {
               <option value="oldest">Oldest</option>
               <option value="best">Best</option>
               <option value="controversial">Controversial</option>
+              <option value="replies">Most Replies</option>
             </select>
           </div>
         )}

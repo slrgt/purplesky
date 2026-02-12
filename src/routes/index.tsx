@@ -176,22 +176,41 @@ export default component$(() => {
     setTimeout(() => loadFeed(), 300);
   });
 
-  // ── Hide floating buttons after scrolling past a threshold; show when scroll stops ───
+  // ── Hide floating buttons when scrolling down; show immediately on scroll up or stop ───
   useVisibleTask$(({ cleanup }) => {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const stopScrollDelay = 200;
-    const scrollThreshold = 48; // px: must scroll this much before buttons start disappearing (avoids dropdown/tap jitter)
+    const scrollThreshold = 48; // px of downward scroll before hiding (avoids jitter)
     let scrollYAtRest = typeof window !== 'undefined' ? window.scrollY : 0;
+    let lastY = scrollYAtRest;
     const onScroll = () => {
       const y = window.scrollY;
-      if (document.body.classList.contains('feed-scrolling')) {
+      const isHidden = document.body.classList.contains('feed-scrolling');
+      const goingUp = y < lastY;
+      lastY = y;
+
+      if (goingUp) {
+        // Scrolling up: immediately show buttons if hidden, and always
+        // update scrollYAtRest so the down-threshold starts from the
+        // highest point the user reaches (not a stale position).
+        if (isHidden) {
+          document.body.classList.remove('feed-scrolling');
+          if (timeoutId) { clearTimeout(timeoutId); timeoutId = undefined; }
+        }
+        scrollYAtRest = y;
+        return;
+      }
+
+      if (isHidden) {
+        // Still scrolling down while hidden: reset the stop-timer
         if (timeoutId) clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
           document.body.classList.remove('feed-scrolling');
           scrollYAtRest = window.scrollY;
           timeoutId = undefined;
         }, stopScrollDelay);
-      } else if (Math.abs(y - scrollYAtRest) >= scrollThreshold) {
+      } else if (y - scrollYAtRest >= scrollThreshold) {
+        // Scrolled down past threshold: hide
         document.body.classList.add('feed-scrolling');
         if (timeoutId) clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {

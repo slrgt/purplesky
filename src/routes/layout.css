@@ -17,6 +17,26 @@
   flex-direction: column;
 }
 
+/* ── Floating back button (top-left) ────────────────────────────────────── */
+.floating-back {
+  position: fixed;
+  top: max(var(--space-md), env(safe-area-inset-top));
+  left: max(var(--space-md), env(safe-area-inset-left));
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text);
+}
+.floating-back:hover {
+  transform: scale(1.05);
+}
+
 /* ── Floating top-right: Account / Login (no top navbar) ────────────────── */
 .floating-top-right {
   position: fixed;
@@ -233,8 +253,71 @@
 .account-dropdown {
   left: auto;
   right: 0;
-  min-width: 180px;
+  min-width: 220px;
   max-height: none;
+}
+
+/* ── Account switcher rows ─────────────────────────────── */
+.acct-row {
+  display: flex !important;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md) !important;
+  width: 100%;
+  text-decoration: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text);
+}
+/* no hover highlight in account dropdown */
+.acct-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.acct-avatar-ph {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--glass-hover);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.acct-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.acct-handle {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-label {
+  font-size: 10px;
+  color: var(--muted);
+}
+.acct-current .acct-label { color: var(--accent); }
+.acct-divider {
+  height: 1px;
+  background: var(--glass-border);
+  margin: var(--space-xs) 0;
+}
+.acct-section { /* group of switchable accounts */ }
+.acct-logout {
+  color: var(--danger, #e55) !important;
+  font-size: var(--font-xs) !important;
 }
 
 .search-dropdown a,
@@ -254,9 +337,7 @@
   cursor: pointer;
 }
 
-.search-dropdown a:hover,
-.account-dropdown a:hover,
-.account-dropdown button:hover {
+.search-dropdown a:hover {
   background: var(--glass-hover);
 }
 
@@ -374,6 +455,54 @@
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* ── Nav Search Bar (expands inside bottom nav) ──────────────────────── */
+.nav-search-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+  min-width: 0;
+}
+.nav-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 20px;
+  background: var(--glass-hover);
+  color: var(--text);
+  font-size: var(--font-sm);
+  outline: none;
+}
+.nav-search-input::placeholder {
+  color: var(--muted);
+}
+.nav-search-input:focus {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.nav-search-go,
+.nav-search-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  flex-shrink: 0;
+  min-width: auto;
+  min-height: auto;
+}
+.nav-search-go:hover,
+.nav-search-close:hover {
+  background: var(--glass-hover);
 }
 
 /* ── Modal ─────────────────────────────────────────────────────────────── */

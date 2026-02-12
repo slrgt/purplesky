@@ -20,11 +20,16 @@
  */
 
 import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
-import { useLocation } from '@builder.io/qwik-city';
+import { Link, useLocation } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
+import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
+import { FollowBell } from '~/components/follow-bell/follow-bell';
+import { RichText } from '~/components/rich-text/rich-text';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { PostView } from '~/lib/types';
+
+import '~/components/comment-thread/comment-thread.css';
 
 export default component$(() => {
   const app = useAppState();
@@ -35,12 +40,18 @@ export default component$(() => {
   const thread = useSignal<unknown>(null);
   const loading = useSignal(true);
   const replyText = useSignal('');
+  const replyImages = useSignal<File[]>([]);
+  const replyImagePreviews = useSignal<string[]>([]);
   /** Map post/reply URI -> downvote record URI (for "I downvoted" state) */
   const myDownvoteUris = useSignal<Record<string, string>>({});
   /** Downvote counts per reply URI (for comment sort by score) */
   const replyDownvoteCounts = useSignal<Record<string, number>>({});
+  /** Set of collapsed comment URIs */
+  const collapsedComments = useSignal<Set<string>>(new Set());
   /** Comment sort mode */
-  const commentSortMode = useSignal<'newest' | 'oldest' | 'best' | 'controversial'>('best');
+  const commentSortMode = useSignal<'newest' | 'oldest' | 'best' | 'controversial' | 'replies'>('best');
+  /** Ref for the video element (must be declared before any early returns) */
+  const videoRef = useSignal<HTMLVideoElement>();
 
   useVisibleTask$(async () => {
     try {
@@ -83,28 +94,51 @@ export default component$(() => {
     const p = post.value;
     const emb = p?.embed as { playlist?: string; media?: { playlist?: string } } | undefined;
     const playlist = emb?.playlist ?? emb?.media?.playlist;
-    if (!playlist || !videoRef.value) return;
+    const videoEl = videoRef.value;
+    if (!playlist || !videoEl || typeof document === 'undefined') return;
+    videoEl.muted = true;
+    const play = () => { videoEl.play().catch(() => {}); };
     const Hls = (await import('hls.js')).default;
     if (Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(playlist);
-      hls.attachMedia(videoRef.value);
-      cleanup(() => { hls.destroy(); });
-    } else if (videoRef.value.canPlayType('application/vnd.apple.mpegurl')) {
-      videoRef.value.src = playlist;
+      hls.attachMedia(videoEl);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => play());
+      const t = setTimeout(play, 500);
+      cleanup(() => {
+        clearTimeout(t);
+        hls.destroy();
+      });
+    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      videoEl.src = playlist;
+      videoEl.load();
+      videoEl.addEventListener('loadeddata', play, { once: true });
+      videoEl.addEventListener('canplay', play, { once: true });
+      const t = setTimeout(play, 500);
+      cleanup(() => {
+        clearTimeout(t);
+        videoEl.removeEventListener('loadeddata', play);
+        videoEl.removeEventListener('canplay', play);
+      });
     }
   });
 
   const handleReply = $(async () => {
-    if (!replyText.value.trim() || !post.value) return;
+    if (!replyText.value.trim() && !replyImages.value.length) return;
+    if (!post.value) return;
     try {
       const { postReply } = await import('~/lib/bsky');
       await postReply(
         post.value.uri, post.value.cid,
         post.value.uri, post.value.cid,
         replyText.value,
+        replyImages.value.length > 0 ? replyImages.value : undefined,
       );
       replyText.value = '';
+      replyImages.value = [];
+      // Revoke preview URLs
+      replyImagePreviews.value.forEach((u) => URL.revokeObjectURL(u));
+      replyImagePreviews.value = [];
       // Reload thread
       const { agent } = await import('~/lib/bsky');
       const res = await agent.getPostThread({ uri, depth: 10 });
@@ -112,6 +146,28 @@ export default component$(() => {
     } catch (err) {
       console.error('Reply failed:', err);
     }
+  });
+
+  const handleReplyImageSelect = $((e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []).slice(0, 4 - replyImages.value.length);
+    if (!files.length) return;
+    replyImages.value = [...replyImages.value, ...files].slice(0, 4);
+    replyImagePreviews.value = [
+      ...replyImagePreviews.value,
+      ...files.map((f) => URL.createObjectURL(f)),
+    ].slice(0, 4);
+    input.value = ''; // Reset so same file can be re-selected
+  });
+
+  const removeReplyImage = $((index: number) => {
+    const imgs = [...replyImages.value];
+    const previews = [...replyImagePreviews.value];
+    URL.revokeObjectURL(previews[index]);
+    imgs.splice(index, 1);
+    previews.splice(index, 1);
+    replyImages.value = imgs;
+    replyImagePreviews.value = previews;
   });
 
   if (loading.value) {
@@ -125,10 +181,13 @@ export default component$(() => {
   const p = post.value;
   const record = p.record as { text?: string; createdAt?: string };
   const embed = p.embed as Record<string, unknown> | undefined;
-  const images = (embed?.images as Array<{ fullsize: string; alt?: string }>) ?? [];
-  const isVideo = (embed?.$type as string) === 'app.bsky.embed.video#view';
-  const videoPlaylist = (embed?.playlist as string) ?? (embed?.media as { playlist?: string })?.playlist;
-  const videoRef = useSignal<HTMLVideoElement>();
+  const mediaEmbed = embed?.media as Record<string, unknown> | undefined;
+  const images = (embed?.images as Array<{ fullsize: string; alt?: string }>)
+    ?? (mediaEmbed?.images as Array<{ fullsize: string; alt?: string }>)
+    ?? [];
+  const isVideo = (embed?.$type as string) === 'app.bsky.embed.video#view'
+    || (mediaEmbed?.$type as string) === 'app.bsky.embed.video#view';
+  const videoPlaylist = (embed?.playlist as string) ?? (mediaEmbed?.playlist as string) ?? undefined;
 
   /** Flatten thread with sort applied at each level (newest/oldest/best/controversial) */
   const flattenedReplies = (() => {
@@ -151,6 +210,7 @@ export default component$(() => {
         if (mode === 'oldest') return getCreated(a).localeCompare(getCreated(b));
         if (mode === 'best') return getScore(b) - getScore(a);
         if (mode === 'controversial') return getControversy(b) - getControversy(a);
+        if (mode === 'replies') return (b.replies?.length ?? 0) - (a.replies?.length ?? 0);
         return 0;
       });
     }
@@ -174,27 +234,62 @@ export default component$(() => {
       <article class="glass-strong" style={{ padding: 'var(--space-xl)', marginBottom: 'var(--space-lg)' }}>
         {/* Author */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
-          {p.author.avatar && (
-            <img src={resizedAvatarUrl(p.author.avatar, 40)} alt="" width="40" height="40" style={{ borderRadius: '50%' }} />
-          )}
-          <div>
+          <FollowAvatar
+            authorDid={p.author.did}
+            followUri={(p.author as { viewer?: { following?: string } }).viewer?.following}
+            profilePath={`/profile/${encodeURIComponent(p.author.handle)}/`}
+            avatarUrl={p.author.avatar ? resizedAvatarUrl(p.author.avatar, 40) : undefined}
+            size={40}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: '600' }}>{p.author.displayName || p.author.handle}</div>
-            <div style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)' }}>@{p.author.handle}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <Link href={`/profile/${encodeURIComponent(p.author.handle)}/`} style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', textDecoration: 'none' }}>@{p.author.handle}</Link>
+              <FollowBell
+                authorDid={p.author.did}
+                followUri={(p.author as { viewer?: { following?: string } }).viewer?.following}
+                followOnAvatar
+                bellKind="user"
+                bellTarget={p.author.did}
+                compact
+              />
+            </div>
           </div>
+          <FollowBell
+            showFollow={false}
+            bellKind="post"
+            bellTarget={p.uri}
+          />
         </div>
 
         {/* Text */}
         {record?.text && (
-          <p style={{ fontSize: 'var(--font-lg)', lineHeight: '1.6', marginBottom: 'var(--space-md)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {record.text}
+          <p style={{ fontSize: 'var(--font-lg)', lineHeight: '1.6', marginBottom: 'var(--space-md)' }}>
+            <RichText text={record.text} />
           </p>
         )}
 
-        {/* Images */}
+        {/* Images – stacked vertically, scale to fit viewport */}
         {images.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+          <div
+            class={images.length > 1 ? 'image-stack-viewport' : ''}
+            style={{
+              marginBottom: 'var(--space-md)',
+              borderRadius: 'var(--glass-radius-sm)',
+              overflow: 'hidden',
+            }}
+          >
             {images.map((img, i) => (
-              <img key={i} src={img.fullsize} alt={img.alt ?? ''} style={{ width: '100%', borderRadius: 'var(--glass-radius-sm)' }} />
+              <img
+                key={i}
+                src={img.fullsize}
+                alt={img.alt ?? ''}
+                style={{
+                  width: '100%',
+                  borderRadius: images.length > 1 ? 0 : 'var(--glass-radius-sm)',
+                  ...(images.length === 1 ? { maxHeight: '80vh', objectFit: 'contain' } : {}),
+                }}
+              />
             ))}
           </div>
         )}
@@ -206,6 +301,9 @@ export default component$(() => {
               <video
                 ref={videoRef}
                 controls
+                autoPlay
+                muted
+                playsInline
                 class="post-detail-video"
                 style={{ width: '100%', maxHeight: '70vh', borderRadius: 'var(--glass-radius-sm)', background: '#000' }}
               />
@@ -249,14 +347,74 @@ export default component$(() => {
 
       {/* Reply Composer */}
       {app.session.isLoggedIn && (
-        <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)' }}>
-          <textarea
-            placeholder="Write a reply..."
-            value={replyText.value}
-            onInput$={(_, el) => { replyText.value = el.value; }}
-            style={{ flex: 1, minHeight: '80px', resize: 'vertical' }}
-          />
-          <button class="btn" onClick$={handleReply} style={{ alignSelf: 'flex-end' }}>Reply</button>
+        <div style={{ marginBottom: 'var(--space-lg)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+            <textarea
+              placeholder="Write a reply..."
+              value={replyText.value}
+              onInput$={(_, el) => { replyText.value = el.value; }}
+              style={{ flex: 1, minHeight: '80px', resize: 'vertical' }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', alignSelf: 'flex-end' }}>
+              <label
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer',
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  color: 'var(--muted)', fontSize: '18px',
+                  opacity: replyImages.value.length >= 4 ? '0.4' : '1',
+                }}
+                title="Attach image"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange$={handleReplyImageSelect}
+                  disabled={replyImages.value.length >= 4}
+                />
+              </label>
+              <button class="btn" onClick$={handleReply}>Reply</button>
+            </div>
+          </div>
+          {/* Image previews */}
+          {replyImagePreviews.value.length > 0 && (
+            <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: 'var(--space-xs)', flexWrap: 'wrap' }}>
+              {replyImagePreviews.value.map((src, i) => (
+                <div key={i} style={{ position: 'relative', width: '80px', height: '80px' }}>
+                  <img
+                    src={src}
+                    alt=""
+                    style={{
+                      width: '80px', height: '80px', objectFit: 'cover',
+                      borderRadius: 'var(--glass-radius-sm)', border: '1px solid var(--border)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick$={() => removeReplyImage(i)}
+                    style={{
+                      position: 'absolute', top: '-6px', right: '-6px',
+                      width: '20px', height: '20px', borderRadius: '50%',
+                      background: 'var(--danger, #e53e3e)', color: '#fff',
+                      border: 'none', cursor: 'pointer', fontSize: '12px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      lineHeight: 1, padding: 0,
+                    }}
+                    aria-label="Remove image"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -274,55 +432,174 @@ export default component$(() => {
               <option value="oldest">Oldest</option>
               <option value="best">Best</option>
               <option value="controversial">Controversial</option>
+              <option value="replies">Most Replies</option>
             </select>
           </div>
         )}
-        {flattenedReplies.map(({ post: rp, depth }) => {
-          const rr = rp.record as { text?: string; createdAt?: string };
-          return (
-            <div
-              key={rp.uri}
-              class="glass"
-              style={{ padding: 'var(--space-md)', marginLeft: `${depth * 16}px`, borderLeft: depth > 0 ? '2px solid var(--border)' : undefined }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
-                {rp.author.avatar && (
-                  <img src={resizedAvatarUrl(rp.author.avatar, 24)} alt="" width="24" height="24" style={{ borderRadius: '50%' }} />
-                )}
-                <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>
-                  {rp.author.displayName || rp.author.handle}
-                </span>
-                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>
-                  @{rp.author.handle}
-                </span>
+        {(() => {
+          // Build descendant counts & filter out children of collapsed comments
+          const collapsed = collapsedComments.value;
+          let skipUntilDepth = -1;
+          return flattenedReplies.map(({ post: rp, depth }, idx) => {
+            // Skip descendants of collapsed comments
+            if (skipUntilDepth >= 0) {
+              if (depth > skipUntilDepth) return null;
+              skipUntilDepth = -1;
+            }
+            const isCollapsed = collapsed.has(rp.uri);
+            // Count descendants (subsequent entries with deeper depth)
+            let descCount = 0;
+            for (let j = idx + 1; j < flattenedReplies.length; j++) {
+              if (flattenedReplies[j].depth <= depth) break;
+              descCount++;
+            }
+            if (isCollapsed) skipUntilDepth = depth;
+            const rr = rp.record as { text?: string; createdAt?: string };
+            return (
+              <div key={rp.uri} style={{ marginBottom: 'var(--space-xs)' }}>
+                <div style={{ display: 'flex', gap: 0 }}>
+                  {/* ── Thread lines for each ancestor depth level ── */}
+                  {Array.from({ length: depth }, (_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      class="ct-depth-line"
+                      aria-label="Collapse parent thread"
+                      onClick$={() => {
+                        // Find the ancestor at this depth and collapse it
+                        for (let j = idx - 1; j >= 0; j--) {
+                          if (flattenedReplies[j].depth === i) {
+                            const next = new Set(collapsed);
+                            next.add(flattenedReplies[j].post.uri);
+                            collapsedComments.value = next;
+                            break;
+                          }
+                        }
+                      }}
+                    />
+                  ))}
+                  {/* ── Collapse button + full-height bar (always rendered so line has no gap) ── */}
+                  <div class="ct-gutter" style={{ '--ct-gutter-top': '19px' } as Record<string, string>}>
+                    <button
+                      type="button"
+                      class="ct-collapse-btn"
+                      onClick$={() => {
+                        const next = new Set(collapsed);
+                        if (next.has(rp.uri)) next.delete(rp.uri); else next.add(rp.uri);
+                        collapsedComments.value = next;
+                      }}
+                      aria-label={isCollapsed ? `Expand ${descCount} replies` : 'Collapse thread'}
+                    >
+                      {isCollapsed ? '+' : '\u2013'}
+                    </button>
+                    <button
+                      type="button"
+                      class="ct-collapse-bar"
+                      onClick$={() => {
+                        const next = new Set(collapsed);
+                        next.add(rp.uri);
+                        collapsedComments.value = next;
+                      }}
+                      aria-label="Collapse thread"
+                    />
+                  </div>
+
+                  {/* ── Right content ── */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ padding: 'var(--space-xs) 0 var(--space-xs) var(--space-sm)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
+                        <FollowAvatar
+                          authorDid={rp.author.did}
+                          followUri={(rp.author as { viewer?: { following?: string } }).viewer?.following}
+                          profilePath={`/profile/${encodeURIComponent(rp.author.handle)}/`}
+                          avatarUrl={rp.author.avatar ? resizedAvatarUrl(rp.author.avatar, 24) : undefined}
+                          size={24}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
+                          {rp.author.displayName && (
+                            <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>{rp.author.displayName}</span>
+                          )}
+                          <Link href={`/profile/${encodeURIComponent(rp.author.handle)}/`} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{rp.author.handle}</Link>
+                        </div>
+                        <FollowBell
+                          authorDid={rp.author.did}
+                          followUri={(rp.author as { viewer?: { following?: string } }).viewer?.following}
+                          followOnAvatar
+                          bellKind="comment"
+                          bellTarget={rp.uri}
+                          compact
+                        />
+                        {isCollapsed && descCount > 0 && (
+                          <span style={{ fontSize: 'var(--font-xs)', color: 'var(--accent)', marginLeft: 'auto' }}>
+                            +{descCount} {descCount === 1 ? 'reply' : 'replies'}
+                          </span>
+                        )}
+                      </div>
+                      {!isCollapsed && (
+                        <>
+                          {rr?.text && (
+                            <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5' }}>
+                              <RichText text={rr.text} />
+                            </p>
+                          )}
+                          {/* Comment images */}
+                          {(() => {
+                            const rpEmbed = rp.embed as Record<string, unknown> | undefined;
+                            const rpMedia = rpEmbed?.media as Record<string, unknown> | undefined;
+                            const rpImages = (rpEmbed?.images as Array<{ thumb: string; fullsize: string; alt?: string }>)
+                              ?? (rpMedia?.images as Array<{ thumb: string; fullsize: string; alt?: string }>)
+                              ?? [];
+                            if (rpImages.length === 0) return null;
+                            return (
+                              <div style={{ marginTop: 'var(--space-xs)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+                                {rpImages.map((img, ii) => (
+                                  <img
+                                    key={ii}
+                                    src={img.fullsize ?? img.thumb}
+                                    alt={img.alt ?? ''}
+                                    loading="lazy"
+                                    style={{
+                                      width: '100%',
+                                      maxHeight: '400px',
+                                      objectFit: 'contain',
+                                      borderRadius: 'var(--glass-radius-sm)',
+                                      background: 'var(--surface)',
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            );
+                          })()}
+                          <ActionBar
+                            subjectUri={rp.uri}
+                            subjectCid={rp.cid}
+                            likeCount={rp.likeCount ?? 0}
+                            liked={!!rp.viewer?.like}
+                            likeRecordUri={rp.viewer?.like}
+                            downvoteCount={replyDownvoteCounts.value[rp.uri] ?? 0}
+                            downvoted={!!myDownvoteUris.value[rp.uri]}
+                            downvoteRecordUri={myDownvoteUris.value[rp.uri]}
+                            onDownvote$={app.session.isLoggedIn ? $(async () => {
+                              myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
+                              replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: (replyDownvoteCounts.value[rp.uri] ?? 0) + 1 };
+                            }) : undefined}
+                            onUndoDownvote$={app.session.isLoggedIn ? $(async () => {
+                              myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
+                              replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: Math.max(0, (replyDownvoteCounts.value[rp.uri] ?? 0) - 1) };
+                            }) : undefined}
+                            replyCount={rp.replyCount ?? 0}
+                            replyHref={`/post/${encodeURIComponent(uri)}/`}
+                            compact
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-              {rr?.text && (
-                <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{rr.text}</p>
-              )}
-              <ActionBar
-                subjectUri={rp.uri}
-                subjectCid={rp.cid}
-                likeCount={rp.likeCount ?? 0}
-                liked={!!rp.viewer?.like}
-                likeRecordUri={rp.viewer?.like}
-                downvoteCount={replyDownvoteCounts.value[rp.uri] ?? 0}
-                downvoted={!!myDownvoteUris.value[rp.uri]}
-                downvoteRecordUri={myDownvoteUris.value[rp.uri]}
-                onDownvote$={app.session.isLoggedIn ? $(async () => {
-                  myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
-                  replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: (replyDownvoteCounts.value[rp.uri] ?? 0) + 1 };
-                }) : undefined}
-                onUndoDownvote$={app.session.isLoggedIn ? $(async () => {
-                  myDownvoteUris.value = await (await import('~/lib/bsky')).listMyDownvotes();
-                  replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: Math.max(0, (replyDownvoteCounts.value[rp.uri] ?? 0) - 1) };
-                }) : undefined}
-                replyCount={rp.replyCount ?? 0}
-                replyHref={`/post/${encodeURIComponent(uri)}/`}
-                compact
-              />
-            </div>
-          );
-        })}
+            );
+          });
+        })()}
       </div>
     </div>
   );

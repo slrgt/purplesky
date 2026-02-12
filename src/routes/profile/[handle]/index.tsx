@@ -17,12 +17,15 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { component$, useSignal, useVisibleTask$, useStore, $ } from '@builder.io/qwik';
+import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
 import { useLocation } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
-import { ActionBar } from '~/components/action-buttons/action-buttons';
+import { PostCard } from '~/components/post-card/post-card';
+import { FollowBell } from '~/components/follow-bell/follow-bell';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { ProfileView, TimelineItem } from '~/lib/types';
+
+import '../../feed.css';
 
 const TABS = ['Posts', 'Media', 'Forums', 'Activity'];
 
@@ -37,7 +40,6 @@ export default component$(() => {
   const notifications = useSignal<Array<{ uri: string; reason: string; author?: { handle?: string; displayName?: string; avatar?: string }; indexedAt?: string; isRead?: boolean }>>([]);
   const loading = useSignal(true);
   const activeTab = useSignal('Posts');
-  const followLoading = useSignal(false);
 
   useVisibleTask$(async () => {
     try {
@@ -79,25 +81,6 @@ export default component$(() => {
     }
   });
 
-  const handleFollow = $(async () => {
-    if (!profile.value || followLoading.value) return;
-    followLoading.value = true;
-    try {
-      if (profile.value.viewer?.following) {
-        const { unfollowUser } = await import('~/lib/bsky');
-        await unfollowUser(profile.value.viewer.following);
-        profile.value = { ...profile.value, viewer: { ...profile.value.viewer, following: undefined } };
-      } else {
-        const { followUser } = await import('~/lib/bsky');
-        const followUri = await followUser(profile.value.did);
-        profile.value = { ...profile.value, viewer: { ...profile.value.viewer, following: followUri } };
-      }
-    } catch (err) {
-      console.error('Follow action failed:', err);
-    }
-    followLoading.value = false;
-  });
-
   if (loading.value) {
     return <div class="flex-center" style={{ padding: 'var(--space-2xl)' }}><div class="spinner" /></div>;
   }
@@ -119,7 +102,17 @@ export default component$(() => {
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ fontSize: 'var(--font-xl)', fontWeight: '700' }}>{p.displayName || p.handle}</h1>
-            <p style={{ color: 'var(--muted)', marginBottom: 'var(--space-sm)' }}>@{p.handle}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
+              <span style={{ color: 'var(--muted)' }}>@{p.handle}</span>
+              <FollowBell
+                authorDid={p.did}
+                followUri={p.viewer?.following}
+                variant="profile"
+                showBell={false}
+                bellKind="user"
+                bellTarget={p.did}
+              />
+            </div>
             {p.description && (
               <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5', marginBottom: 'var(--space-md)' }}>
                 {p.description}
@@ -131,15 +124,6 @@ export default component$(() => {
               <span><strong>{p.postsCount ?? 0}</strong> posts</span>
             </div>
           </div>
-          {!isMe && app.session.isLoggedIn && (
-            <button
-              class={p.viewer?.following ? 'btn-ghost' : 'btn'}
-              onClick$={handleFollow}
-              disabled={followLoading.value}
-            >
-              {followLoading.value ? '…' : p.viewer?.following ? 'Following' : 'Follow'}
-            </button>
-          )}
         </div>
       </div>
 
@@ -161,39 +145,36 @@ export default component$(() => {
         ))}
       </div>
 
-      {/* Posts tab */}
-      {activeTab.value === 'Posts' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-          {posts.value.map((item) => {
-            const rec = item.post.record as { text?: string; createdAt?: string };
-            const postPath = `/post/${encodeURIComponent(item.post.uri)}/`;
-            return (
-              <div key={item.post.uri} class="glass" style={{ padding: 'var(--space-md)' }}>
-                {rec?.text && <p style={{ fontSize: 'var(--font-sm)', lineHeight: '1.5' }}>{rec.text}</p>}
-                <div style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', marginTop: 'var(--space-xs)' }}>
-                  {rec?.createdAt && new Date(rec.createdAt).toLocaleDateString()}
-                </div>
-                <ActionBar
-                  subjectUri={item.post.uri}
-                  subjectCid={item.post.cid}
-                  likeCount={item.post.likeCount ?? 0}
-                  liked={!!item.post.viewer?.like}
-                  likeRecordUri={item.post.viewer?.like}
-                  downvoteCount={0}
-                  replyCount={item.post.replyCount ?? 0}
-                  replyHref={postPath}
-                  compact
-                />
+      {/* Posts tab – masonry grid with PostCard like homepage */}
+      {activeTab.value === 'Posts' && (() => {
+        const numCols = app.viewColumns;
+        const columns: Array<Array<TimelineItem>> = Array.from({ length: numCols }, () => []);
+        posts.value.forEach((item, i) => {
+          columns[i % numCols].push(item);
+        });
+        return posts.value.length > 0 ? (
+          <div class={`masonry-grid masonry-cols-${numCols}`}>
+            {columns.map((col, colIdx) => (
+              <div key={colIdx} class="masonry-column">
+                {col.map((item) => (
+                  <PostCard
+                    key={item.post.uri}
+                    item={item}
+                    isSeen={false}
+                    onSeen$={$(() => {})}
+                    cardViewMode={app.cardViewMode}
+                    nsfwBlurred={app.nsfwMode === 'blur'}
+                  />
+                ))}
               </div>
-            );
-          })}
-          {posts.value.length === 0 && (
-            <p style={{ color: 'var(--muted)', textAlign: 'center' }}>No posts yet.</p>
-          )}
-        </div>
-      )}
+            ))}
+          </div>
+        ) : (
+          <p style={{ color: 'var(--muted)', textAlign: 'center' }}>No posts yet.</p>
+        );
+      })()}
 
-      {/* Media tab: posts with images or video */}
+      {/* Media tab: posts with images or video – masonry layout */}
       {activeTab.value === 'Media' && (() => {
         const mediaItems = posts.value.filter((item) => {
           const emb = item.post.embed as { $type?: string; images?: unknown[]; media?: { $type?: string } } | undefined;
@@ -201,21 +182,30 @@ export default component$(() => {
             emb?.$type === 'app.bsky.embed.video#view' ||
             emb?.media?.$type === 'app.bsky.embed.images#view' || emb?.media?.$type === 'app.bsky.embed.video#view';
         });
-        return (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-sm)' }}>
-            {mediaItems.map((item) => {
-              const emb = item.post.embed as { images?: Array<{ thumb: string }>; thumbnail?: string } | undefined;
-              const thumb = emb?.images?.[0]?.thumb ?? emb?.thumbnail ?? '';
-              return (
-                <a key={item.post.uri} href={`/post/${encodeURIComponent(item.post.uri)}/`} style={{ display: 'block' }}>
-                  <img src={thumb} alt="" style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 'var(--glass-radius-sm)' }} loading="lazy" />
-                </a>
-              );
-            })}
-            {mediaItems.length === 0 && (
-              <p style={{ gridColumn: '1 / -1', color: 'var(--muted)', textAlign: 'center' }}>No media posts.</p>
-            )}
+        const numCols = app.viewColumns;
+        const columns: Array<Array<TimelineItem>> = Array.from({ length: numCols }, () => []);
+        mediaItems.forEach((item, i) => {
+          columns[i % numCols].push(item);
+        });
+        return mediaItems.length > 0 ? (
+          <div class={`masonry-grid masonry-cols-${numCols}`}>
+            {columns.map((col, colIdx) => (
+              <div key={colIdx} class="masonry-column">
+                {col.map((item) => (
+                  <PostCard
+                    key={item.post.uri}
+                    item={item}
+                    isSeen={false}
+                    onSeen$={$(() => {})}
+                    cardViewMode={app.cardViewMode}
+                    nsfwBlurred={app.nsfwMode === 'blur'}
+                  />
+                ))}
+              </div>
+            ))}
           </div>
+        ) : (
+          <p style={{ color: 'var(--muted)', textAlign: 'center' }}>No media posts.</p>
         );
       })()}
 

@@ -457,6 +457,24 @@ body.feed-scrolling .nav {
   animation: spin 0.8s linear infinite;
 }
 
+/* ── Viewport-fitting image stack (posts + post detail) ───────────────── */
+.image-stack-viewport {
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+  gap: 0;
+  overflow: hidden;
+}
+.image-stack-viewport img {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: block;
+  object-fit: contain;
+  object-position: center;
+  background: var(--surface);
+}
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   :root {

@@ -17,7 +17,9 @@
  */
 
 import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
+import { Link } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
+import { RichText } from '~/components/rich-text/rich-text';
 import type { Artboard } from '~/lib/types';
 
 export default component$(() => {
@@ -148,11 +150,13 @@ export default component$(() => {
                     />
                   )}
                   <div style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>
-                    {post.authorHandle && <span>@{post.authorHandle}</span>}
+                    {post.authorHandle && (
+                      <Link href={`/profile/${encodeURIComponent(post.authorHandle)}/`} style={{ color: 'inherit', textDecoration: 'none' }}>@{post.authorHandle}</Link>
+                    )}
                   </div>
                   {post.text && (
                     <p class="truncate" style={{ fontSize: 'var(--font-xs)' }}>
-                      {post.text.slice(0, 60)}
+                      <RichText text={post.text.slice(0, 60) + (post.text.length > 60 ? '…' : '')} />
                     </p>
                   )}
                 </div>

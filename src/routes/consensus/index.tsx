@@ -27,6 +27,7 @@
 
 import { component$, useSignal, useStore, useVisibleTask$, $ } from '@builder.io/qwik';
 import { useAppState } from '~/context/app-context';
+import { RichText } from '~/components/rich-text/rich-text';
 import type { ConsensusResult } from '~/lib/types';
 
 const STATEMENT_COLLECTION = 'app.purplesky.forum.post';
@@ -236,7 +237,9 @@ export default component$(() => {
           const sr = getStatementResult(stmt.id);
           return (
             <div key={stmt.id} class="glass" style={{ padding: 'var(--space-md)' }}>
-              <p style={{ marginBottom: 'var(--space-md)', lineHeight: '1.5' }}>{stmt.text}</p>
+              <p style={{ marginBottom: 'var(--space-md)', lineHeight: '1.5' }}>
+                <RichText text={stmt.text} />
+              </p>
 
               {/* Vote buttons */}
               <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: sr ? 'var(--space-sm)' : '0' }}>
