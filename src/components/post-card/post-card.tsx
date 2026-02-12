@@ -197,7 +197,9 @@ export const PostCard = component$<PostCardProps>(({
     return `${days}d`;
   })();
 
-  // Encode URI for routing (router-relative; Qwik adds base when deployed)
+  // Paths: use full path (with base) for programmatic nav so deployed app opens correct URL
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+  const postPathForNav = `${base}/post/${encodeURIComponent(post.uri)}/`;
   const postPath = `/post/${encodeURIComponent(post.uri)}/`;
   const profilePath = `/profile/${encodeURIComponent(post.author.handle)}/`;
 
@@ -208,10 +210,10 @@ export const PostCard = component$<PostCardProps>(({
       ref={cardRef}
       class={`post-card glass post-card-${cardViewMode} ${isSeen ? 'post-card-seen' : ''} ${isInAnyArtboard ? 'post-card-in-collection' : ''} ${isSelected ? 'post-card-selected' : ''} ${isMouseOver ? 'post-card-mouse-over' : ''}`}
       data-post-uri={post.uri}
-      onClick$={() => nav(postPath)}
+      onClick$={() => nav(postPathForNav)}
       role="button"
       tabIndex={0}
-      onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(postPath); } }}
+      onKeyDown$={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(postPathForNav); } }}
     >
       {/* ── Media ────────────────────────────────────────────────────── */}
       {hasMedia && (
