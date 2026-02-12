@@ -176,6 +176,52 @@ npm run build
 
 **Custom base path (e.g. self-hosted at a subpath):** Set `VITE_BASE_PATH` when building, e.g. `VITE_BASE_PATH=/my-app/ npm run build`.
 
+### Deploy to your own domain
+
+You can serve PurpleSky at a **custom domain** (e.g. `https://app.example.com`) in two ways.
+
+#### Option A: GitHub Pages with a custom domain
+
+1. **Configure the custom domain in GitHub**
+   - Repo → **Settings** → **Pages** → under "Custom domain", enter your domain (e.g. `app.example.com`).
+   - Save. GitHub will show DNS instructions (usually a CNAME to `username.github.io` or A/AAAA records).
+
+2. **Build with base path `/`**
+   - The app must be built for the **root** of the domain (no `/purplesky/` subpath). Use a workflow or manual build with:
+   - `VITE_BASE_PATH=/`
+   - `VITE_ORIGIN=https://your-domain.com` (with your real domain, no trailing slash).
+
+3. **Deploy the root build**
+   - With `VITE_BASE_PATH=/`, the build output is at the root of `dist/` (e.g. `dist/index.html`, `dist/build/`). Upload the **contents** of `dist/` to the root of your site (or use a workflow that does this for GitHub Pages).
+
+4. **Bluesky OAuth**
+   - Bluesky must allow your redirect URI. Your app URL is the custom domain (e.g. `https://app.example.com/`). The workflow or your host must generate `client-metadata.json` with that URL (see `.github/workflows/deploy.yml` for the JSON shape). The optional workflow `.github/workflows/deploy-custom-domain.yml` generates it from the origin you provide.
+
+5. **Optional: use the custom-domain workflow**
+   - The repo includes `.github/workflows/deploy-custom-domain.yml`. Run it **manually** (Actions → Deploy to GitHub Pages (custom domain) → Run workflow) and enter your origin (e.g. `https://app.example.com`). It builds with `VITE_BASE_PATH=/` and uploads the root of `dist/`. If you only use a custom domain, consider disabling the default deploy on push (edit `deploy.yml` or use a separate branch) so the two workflows don’t overwrite each other.
+
+#### Option B: Any static host (Netlify, Vercel, Cloudflare Pages, or your server)
+
+1. **Build for root or subpath**
+   - **At domain root** (e.g. `https://purplesky.example.com/`):
+     ```bash
+     VITE_BASE_PATH=/ VITE_ORIGIN=https://purplesky.example.com npm run build
+     ```
+   - **At a subpath** (e.g. `https://example.com/app/`):
+     ```bash
+     VITE_BASE_PATH=/app/ VITE_ORIGIN=https://example.com npm run build
+     ```
+
+2. **Upload the right folder**
+   - With `VITE_BASE_PATH=/`: upload the contents of `dist/` (you may need to copy `dist/build` into the same folder as `index.html` if the build splits them; see `.github/workflows/deploy.yml` “Prepare dist”).
+   - With `VITE_BASE_PATH=/app/`: upload the contents of `dist/app/` (or whatever folder contains `index.html` and `build/`).
+
+3. **SPA fallback**
+   - For client-side routing, your host must serve `index.html` for all routes (e.g. Netlify/Vercel “single-page app” or `/* → /index.html`). GitHub Pages uses `404.html` for this.
+
+4. **OAuth / PWA**
+   - Ensure `client-metadata.json` and `manifest.json` use your real origin and path (e.g. `https://purplesky.example.com/`). The build rewrites the manifest; for `client-metadata.json` you may need to generate it at deploy time (see workflow) or edit `public/client-metadata.json` before building.
+
 Or build manually and upload:
 
 ```bash
