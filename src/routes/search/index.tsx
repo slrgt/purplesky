@@ -6,6 +6,7 @@ import { component$, useSignal, useVisibleTask$ } from '@builder.io/qwik';
 import { Link, useLocation } from '@builder.io/qwik-city';
 import { RichText } from '~/components/rich-text/rich-text';
 import { resizedAvatarUrl } from '~/lib/image-utils';
+import { withBase } from '~/lib/path';
 import type { PostView } from '~/lib/types';
 
 export default component$(() => {
@@ -66,7 +67,7 @@ export default component$(() => {
             {actors.value.map((a) => (
               <Link
                 key={a.did}
-                href={`/profile/${encodeURIComponent(a.handle)}/`}
+                href={withBase(`/profile/${encodeURIComponent(a.handle)}/`)}
                 class="glass"
                 style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', padding: 'var(--space-md)', textDecoration: 'none', color: 'var(--text)' }}
               >
@@ -75,7 +76,7 @@ export default component$(() => {
                 )}
                 <div>
                   <div style={{ fontWeight: '600' }}>{a.displayName || a.handle}</div>
-                  <Link href={`/profile/${encodeURIComponent(a.handle)}/`} style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', textDecoration: 'none' }}>@{a.handle}</Link>
+                  <Link href={withBase(`/profile/${encodeURIComponent(a.handle)}/`)} style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', textDecoration: 'none' }}>@{a.handle}</Link>
                 </div>
               </Link>
             ))}
@@ -91,7 +92,7 @@ export default component$(() => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
           {posts.value.map((p) => {
             const rec = p.record as { text?: string };
-            const postHref = `/post/${encodeURIComponent(p.uri)}/`;
+            const postHref = withBase(`/post/${encodeURIComponent(p.uri)}/`);
             return (
               <div
                 key={p.uri}
@@ -104,7 +105,7 @@ export default component$(() => {
                   )}
                   <span style={{ fontWeight: '600' }}>{p.author?.displayName || p.author?.handle}</span>
                   {p.author?.handle && (
-                    <Link href={`/profile/${encodeURIComponent(p.author.handle)}/`} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{p.author.handle}</Link>
+                    <Link href={withBase(`/profile/${encodeURIComponent(p.author.handle)}/`)} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{p.author.handle}</Link>
                   )}
                 </div>
                 {rec?.text && (

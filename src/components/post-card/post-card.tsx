@@ -23,6 +23,7 @@
 import { component$, useSignal, useVisibleTask$, type QRL } from '@builder.io/qwik';
 import { Link, useNavigate } from '@builder.io/qwik-city';
 import type { TimelineItem, CardViewMode } from '~/lib/types';
+import { withBase } from '~/lib/path';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
 import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
@@ -197,9 +198,9 @@ export const PostCard = component$<PostCardProps>(({
     return `${days}d`;
   })();
 
-  // Use router-relative path so nav() does client-side transition (keeps session, works when logged out)
-  const postPath = `/post/${encodeURIComponent(post.uri)}/`;
-  const profilePath = `/profile/${encodeURIComponent(post.author.handle)}/`;
+  // Use base-prefixed path so nav() and links work when deployed at a subpath (e.g. GitHub Pages)
+  const postPath = withBase(`/post/${encodeURIComponent(post.uri)}/`);
+  const profilePath = withBase(`/profile/${encodeURIComponent(post.author.handle)}/`);
 
   const showNsfwOverlay = nsfwBlurred;
 

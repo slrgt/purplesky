@@ -20,6 +20,7 @@ import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
 import { Link } from '@builder.io/qwik-city';
 import { useAppState } from '~/context/app-context';
 import { RichText } from '~/components/rich-text/rich-text';
+import { withBase } from '~/lib/path';
 import type { Artboard } from '~/lib/types';
 
 export default component$(() => {
@@ -151,7 +152,7 @@ export default component$(() => {
                   )}
                   <div style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>
                     {post.authorHandle && (
-                      <Link href={`/profile/${encodeURIComponent(post.authorHandle)}/`} style={{ color: 'inherit', textDecoration: 'none' }}>@{post.authorHandle}</Link>
+                      <Link href={withBase(`/profile/${encodeURIComponent(post.authorHandle)}/`)} style={{ color: 'inherit', textDecoration: 'none' }}>@{post.authorHandle}</Link>
                     )}
                   </div>
                   {post.text && (

@@ -23,6 +23,7 @@ import { component$, useSignal, useVisibleTask$, $ } from '@builder.io/qwik';
 import { Link, useLocation, useNavigate } from '@builder.io/qwik-city';
 import { RichText } from '~/components/rich-text/rich-text';
 import { useAppState } from '~/context/app-context';
+import { withBase } from '~/lib/path';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
 import { CommentThread } from '~/components/comment-thread/comment-thread';
 import type { ForumPost, ForumReply } from '~/lib/types';
@@ -132,7 +133,7 @@ export default component$(() => {
     try {
       const { deleteForumPost } = await import('~/lib/forum');
       await deleteForumPost(postUri);
-      nav('/forum/');
+      nav(withBase('/forum/'));
     } catch (err) {
       console.error('Failed to delete:', err);
     }
@@ -171,7 +172,7 @@ export default component$(() => {
             <img src={p.authorAvatar} alt="" width="28" height="28" style={{ borderRadius: '50%' }} />
           )}
           {p.authorHandle ? (
-            <Link href={`/profile/${encodeURIComponent(p.authorHandle)}/`} style={{ color: 'inherit', textDecoration: 'none' }}>@{p.authorHandle}</Link>
+            <Link href={withBase(`/profile/${encodeURIComponent(p.authorHandle)}/`)} style={{ color: 'inherit', textDecoration: 'none' }}>@{p.authorHandle}</Link>
           ) : (
             <span>@{p.did}</span>
           )}

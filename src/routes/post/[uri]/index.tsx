@@ -26,6 +26,7 @@ import { ActionBar } from '~/components/action-buttons/action-buttons';
 import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
 import { FollowBell } from '~/components/follow-bell/follow-bell';
 import { RichText } from '~/components/rich-text/rich-text';
+import { withBase } from '~/lib/path';
 import { resizedAvatarUrl } from '~/lib/image-utils';
 import type { PostView } from '~/lib/types';
 
@@ -244,7 +245,7 @@ export default component$(() => {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: '600' }}>{p.author.displayName || p.author.handle}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-              <Link href={`/profile/${encodeURIComponent(p.author.handle)}/`} style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', textDecoration: 'none' }}>@{p.author.handle}</Link>
+              <Link href={withBase(`/profile/${encodeURIComponent(p.author.handle)}/`)} style={{ fontSize: 'var(--font-sm)', color: 'var(--muted)', textDecoration: 'none' }}>@{p.author.handle}</Link>
               <FollowBell
                 authorDid={p.author.did}
                 followUri={(p.author as { viewer?: { following?: string } }).viewer?.following}
@@ -335,7 +336,7 @@ export default component$(() => {
               replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [p.uri]: Math.max(0, (replyDownvoteCounts.value[p.uri] ?? 0) - 1) };
             }) : undefined}
             replyCount={p.replyCount ?? 0}
-            replyHref={`/post/${encodeURIComponent(p.uri)}/`}
+            replyHref={withBase(`/post/${encodeURIComponent(p.uri)}/`)}
           />
         </div>
         {record?.createdAt && (
@@ -519,7 +520,7 @@ export default component$(() => {
                           {rp.author.displayName && (
                             <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>{rp.author.displayName}</span>
                           )}
-                          <Link href={`/profile/${encodeURIComponent(rp.author.handle)}/`} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{rp.author.handle}</Link>
+                          <Link href={withBase(`/profile/${encodeURIComponent(rp.author.handle)}/`)} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{rp.author.handle}</Link>
                         </div>
                         <FollowBell
                           authorDid={rp.author.did}
@@ -588,7 +589,7 @@ export default component$(() => {
                               replyDownvoteCounts.value = { ...replyDownvoteCounts.value, [rp.uri]: Math.max(0, (replyDownvoteCounts.value[rp.uri] ?? 0) - 1) };
                             }) : undefined}
                             replyCount={rp.replyCount ?? 0}
-                            replyHref={`/post/${encodeURIComponent(uri)}/`}
+                            replyHref={withBase(`/post/${encodeURIComponent(uri)}/`)}
                             compact
                           />
                         </>

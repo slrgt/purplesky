@@ -23,6 +23,7 @@ import { useAppState } from '~/context/app-context';
 import { PostCard } from '~/components/post-card/post-card';
 import { FollowBell } from '~/components/follow-bell/follow-bell';
 import { resizedAvatarUrl } from '~/lib/image-utils';
+import { withBase } from '~/lib/path';
 import type { ProfileView, TimelineItem } from '~/lib/types';
 
 import '../../feed.css';
@@ -213,7 +214,7 @@ export default component$(() => {
       {activeTab.value === 'Forums' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
           {forumPosts.value.map((fp) => (
-            <a key={fp.uri} href={`/forum/${encodeURIComponent(fp.uri)}/`} class="glass" style={{ padding: 'var(--space-md)', textDecoration: 'none', color: 'var(--text)' }}>
+            <a key={fp.uri} href={withBase(`/forum/${encodeURIComponent(fp.uri)}/`)} class="glass" style={{ padding: 'var(--space-md)', textDecoration: 'none', color: 'var(--text)' }}>
               <div style={{ fontWeight: '600' }}>{fp.title || 'Untitled'}</div>
               {fp.createdAt && <div style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)' }}>{new Date(fp.createdAt).toLocaleDateString()}</div>}
             </a>

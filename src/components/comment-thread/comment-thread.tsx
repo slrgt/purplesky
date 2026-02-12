@@ -21,6 +21,7 @@
 import { component$, useSignal, $ } from '@builder.io/qwik';
 import type { ForumReply } from '~/lib/types';
 import { resizedAvatarUrl } from '~/lib/image-utils';
+import { withBase } from '~/lib/path';
 import { ActionBar } from '~/components/action-buttons/action-buttons';
 import { FollowAvatar } from '~/components/follow-avatar/follow-avatar';
 import { FollowBell } from '~/components/follow-bell/follow-bell';
@@ -180,7 +181,7 @@ const CommentNode = component$<{
                 {reply.author.displayName && (
                   <span style={{ fontSize: 'var(--font-sm)', fontWeight: '600' }}>{reply.author.displayName}</span>
                 )}
-                <Link href={`/profile/${encodeURIComponent(reply.author.handle)}/`} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{reply.author.handle}</Link>
+                <Link href={withBase(`/profile/${encodeURIComponent(reply.author.handle)}/`)} style={{ fontSize: 'var(--font-xs)', color: 'var(--muted)', textDecoration: 'none' }}>@{reply.author.handle}</Link>
               </div>
               <FollowBell
                 authorDid={reply.author.did}

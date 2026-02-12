@@ -28,6 +28,7 @@ import { useAppState } from '~/context/app-context';
 import { PostCard } from '~/components/post-card/post-card';
 import { FeedSelector } from '~/components/feed-selector/feed-selector';
 import type { TimelineItem } from '~/lib/types';
+import { withBase } from '~/lib/path';
 import * as bsky from '~/lib/bsky';
 
 import './feed.css';
@@ -511,7 +512,7 @@ export default component$(() => {
       // E = Enter/open post
       if (key === 'e') {
         e.preventDefault();
-        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        nav(withBase(`/post/${encodeURIComponent(item.post.uri)}/`));
         return;
       }
 
@@ -535,7 +536,7 @@ export default component$(() => {
       // R = Reply (navigate to post with reply intent)
       if (key === 'r') {
         e.preventDefault();
-        nav(`/post/${encodeURIComponent(item.post.uri)}/`);
+        nav(withBase(`/post/${encodeURIComponent(item.post.uri)}/`));
         return;
       }
     };
@@ -859,7 +860,7 @@ const SuggestedFollowsSection = component$(() => {
             suggested.value.map((s) => (
               <a
                 key={s.did}
-                href={`/profile/${encodeURIComponent(s.handle)}/`}
+                href={withBase(`/profile/${encodeURIComponent(s.handle)}/`)}
                 class="flex-between glass"
                 style={{ padding: 'var(--space-sm) var(--space-md)', textDecoration: 'none', color: 'var(--text)' }}
               >

@@ -448,7 +448,7 @@ export default component$(() => {
       // / = go to search page
       if (key === '/') {
         e.preventDefault();
-        nav('/search/');
+        nav(navHref('/search/'));
         return;
       }
 
@@ -461,8 +461,10 @@ export default component$(() => {
 
       // Q = go back (except on feed page where it's handled by feed nav)
       if (key === 'q' && e.key !== 'Backspace') {
-        const path = loc.url.pathname;
-        if (path !== '/' && !path.startsWith('/feed')) {
+        const pathname = loc.url.pathname;
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+        const pathAfterBase = base && pathname.startsWith(base) ? pathname.slice(base.length) || '/' : pathname;
+        if (pathAfterBase !== '/' && pathAfterBase !== '' && !pathAfterBase.startsWith('/feed')) {
           e.preventDefault();
           window.history.back();
         }
@@ -542,7 +544,7 @@ export default component$(() => {
                         onClick$={async () => {
                           const handle = store.session.handle;
                           accountMenuOpen.value = false;
-                          if (handle) await nav(`/profile/${encodeURIComponent(handle)}/`);
+                          if (handle) await nav(navHref(`/profile/${encodeURIComponent(handle)}/`));
                         }}
                       >
                         {store.session.avatar ? (
@@ -725,7 +727,7 @@ export default component$(() => {
                 navSearchOpen.value = false;
                 navSearchQuery.value = '';
                 navSearchShowSuggestions.value = false;
-                await nav(`/search/?q=${encodeURIComponent(q)}`);
+                await nav(navHref(`/search/?q=${encodeURIComponent(q)}`));
               }
             }}
           >
@@ -768,7 +770,7 @@ export default component$(() => {
                         navSearchOpen.value = false;
                         navSearchQuery.value = '';
                         navSearchShowSuggestions.value = false;
-                        await nav(`/search/?q=${encodeURIComponent(q)}`);
+                        await nav(navHref(`/search/?q=${encodeURIComponent(q)}`));
                       }
                     } else {
                       const actor = navSearchSuggestions.value[idx - 1];
@@ -813,7 +815,7 @@ export default component$(() => {
                     navSearchOpen.value = false;
                     navSearchQuery.value = '';
                     navSearchShowSuggestions.value = false;
-                    await nav(`/search/?q=${encodeURIComponent(q)}`);
+                    await nav(navHref(`/search/?q=${encodeURIComponent(q)}`));
                   }
                 }}
                 onMouseEnter$={() => { navSearchSelectedIndex.value = 0; }}

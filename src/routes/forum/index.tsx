@@ -23,6 +23,7 @@
 
 import { component$, useSignal, useStore, useVisibleTask$, $ } from '@builder.io/qwik';
 import { Link } from '@builder.io/qwik-city';
+import { withBase } from '~/lib/path';
 import { useAppState } from '~/context/app-context';
 import type { ForumPost } from '~/lib/types';
 
@@ -169,7 +170,7 @@ export default component$(() => {
           {displayPosts.map((post) => (
             <Link
               key={post.uri}
-              href={`/forum/${encodeURIComponent(post.uri)}/`}
+              href={withBase(`/forum/${encodeURIComponent(post.uri)}/`)}
               class="glass"
               style={{
                 display: 'block', padding: 'var(--space-md)', textDecoration: 'none', color: 'var(--text)',

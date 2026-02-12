@@ -5,6 +5,7 @@
 
 import { component$ } from '@builder.io/qwik';
 import { Link } from '@builder.io/qwik-city';
+import { withBase } from '~/lib/path';
 
 import './rich-text.css';
 
@@ -93,7 +94,7 @@ export const RichText = component$<RichTextProps>(({ text, class: className, sty
           );
         }
         return (
-          <Link key={i} href={href} class={linkClass}>
+          <Link key={i} href={withBase(href)} class={linkClass}>
             {seg.content}
           </Link>
         );
