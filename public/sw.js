@@ -141,14 +141,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // JS/CSS chunks under /build/: network-first so we never serve stale or empty cached
-  // responses (Qwik dynamic imports fail with "<empty string>" if the chunk body is empty).
-  if (url.pathname.includes('/build/')) {
-    event.respondWith(
-      networkFirstChunk(event.request).catch(() => fetch(event.request))
-    );
-    return;
-  }
+  // JS/CSS chunks under /build/: do NOT intercept — let the browser fetch directly.
+  // Intercepting (even network-first) can cause "NetworkError" or empty responses and
+  // breaks Qwik dynamic imports. Chunks are content-hashed so they're cacheable by the browser.
+  if (url.pathname.includes('/build/')) return;
 
   // Static assets: Cache-first (fallback to network on any SW error so chunks always load)
   event.respondWith(
@@ -183,24 +179,6 @@ async function cacheFirst(request, cacheName) {
       if (fallback) return fallback;
     }
     throw new Error('cacheFirst failed');
-  }
-}
-
-// ── Network-First for /build/ chunks ───────────────────────────────────────
-// Ensures we never serve a cached empty or 404 response to dynamic imports.
-async function networkFirstChunk(request) {
-  try {
-    const response = await fetch(request);
-    if (response.ok && response.type === 'basic') {
-      try {
-        const cache = await caches.open(STATIC_CACHE);
-        cache.put(request, response.clone());
-      } catch { /* ignore */ }
-    }
-    return response;
-  } catch {
-    const cached = await caches.match(request);
-    return cached || Promise.reject(new Error('networkFirstChunk failed'));
   }
 }
 
