@@ -148,6 +148,15 @@ npm start
 # Opens at http://localhost:5173
 ```
 
+By default the dev server serves the app at the **root** (`/`). To run it at a **subpath** (e.g. to match production at `/purplesky/`):
+
+```bash
+npm run dev:subpath
+# Then open http://127.0.0.1:5173/purplesky/
+```
+
+Or set the base manually: `VITE_BASE_PATH=/purplesky/ npm run dev`, then open `http://127.0.0.1:5173/purplesky/`.
+
 ### Build for Production
 
 ```bash

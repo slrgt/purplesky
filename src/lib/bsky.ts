@@ -281,9 +281,24 @@ export async function logoutAccount(did: string): Promise<string | null> {
     saveAccounts(accounts);
   }
   try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
-  // Return next available DID
+
+  // If the next account is a credential (app-password) account, resume it so
+  // the in-memory agent matches the active account; otherwise getSession() would
+  // still return the old DID until the next page load.
+  const nextCredentialDid = accounts.activeDid;
+  if (nextCredentialDid) {
+    const nextSession = accounts.sessions[nextCredentialDid];
+    if (nextSession?.accessJwt) {
+      try {
+        await credentialAgent.resumeSession(nextSession);
+        try { localStorage.setItem(SESSION_KEY, JSON.stringify(nextSession)); } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    }
+  }
+
+  // Return next available DID (OAuth takes precedence for switcher)
   const oauthAccounts = getOAuthAccounts();
-  return oauthAccounts.activeDid ?? accounts.activeDid;
+  return oauthAccounts.activeDid ?? accounts.activeDid ?? null;
 }
 
 // ── Timeline & Feeds ──────────────────────────────────────────────────────

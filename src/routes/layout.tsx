@@ -367,11 +367,34 @@ export default component$(() => {
   const onLogout = $(async () => {
     const currentDid = store.session.did;
     if (!currentDid) return;
-    const { logoutAccount } = await import('~/lib/bsky');
+    const { logoutAccount, getOAuthAccountsSnapshot, getAccountProfiles, saveAccountProfile } = await import('~/lib/bsky');
     const nextDid = await logoutAccount(currentDid);
     if (nextDid) {
-      // Switch to next account
-      await onSwitchAccount(nextDid);
+      // Next account may be OAuth (switch via restore) or credential (already resumed in logoutAccount)
+      const oauthSnap = getOAuthAccountsSnapshot();
+      if (oauthSnap.dids.includes(nextDid)) {
+        await onSwitchAccount(nextDid);
+      } else {
+        // Credential account: session already resumed in bsky; just update store
+        store.session.did = nextDid;
+        store.session.isLoggedIn = true;
+        try {
+          const { agent } = await import('~/lib/bsky');
+          const profile = await agent.getProfile({ actor: nextDid });
+          const d = profile.data as { handle?: string; avatar?: string; displayName?: string };
+          store.session.handle = d.handle ?? null;
+          store.session.avatar = d.avatar ?? null;
+          saveAccountProfile({ did: nextDid, handle: d.handle ?? nextDid, avatar: d.avatar, displayName: d.displayName });
+        } catch { /* ignore */ }
+        const profiles = getAccountProfiles();
+        otherAccounts.value = oauthSnap.dids
+          .filter((d: string) => d !== nextDid)
+          .map((d: string) => {
+            const p = profiles[d];
+            return { did: d, handle: p?.handle ?? d.slice(0, 16) + '…', avatar: p?.avatar };
+          });
+        accountMenuOpen.value = false;
+      }
     } else {
       // No accounts left — fully logged out
       store.session.did = null;

@@ -5,9 +5,13 @@
  *  - Qwik framework plugin (enables resumability)
  *  - QwikCity plugin (file-based routing)
  *  - WASM support (loads Rust-compiled WebAssembly modules)
- *  - Base path for GitHub Pages deployment
+ *  - Base path for deployment and local subpath dev
  *
- * To edit the base path for deployment, change VITE_BASE_PATH env var.
+ * Base URL:
+ *  - Production build: defaults to /purplesky-1/ (override with VITE_BASE_PATH).
+ *  - Dev (npm run dev): defaults to / so app is at http://127.0.0.1:5173/
+ *  - Dev at subpath: set VITE_BASE_PATH=/purplesky/ then open http://127.0.0.1:5173/purplesky/
+ *    Or use: npm run dev:subpath
  */
 
 import { defineConfig, type Plugin } from 'vite';
